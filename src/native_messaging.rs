@@ -33,7 +33,9 @@ pub fn run_native_host() -> Result<()> {
                     },
                 )?;
             }
-            ExtensionMessage::Hello { protocol_version, .. } => {
+            ExtensionMessage::Hello {
+                protocol_version, ..
+            } => {
                 write_json(
                     &mut writer,
                     &AppMessage::Error {
@@ -125,7 +127,8 @@ mod tests {
 
         let mut cursor = std::io::Cursor::new(bytes);
         let frame = read_frame(&mut cursor).unwrap().unwrap();
-        assert!(String::from_utf8(frame).unwrap().contains("check_voice_status"));
+        assert!(String::from_utf8(frame)
+            .unwrap()
+            .contains("check_voice_status"));
     }
 }
-

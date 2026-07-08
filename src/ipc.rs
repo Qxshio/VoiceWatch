@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::messages::VoiceStatusEnvelope;
 
 #[derive(Debug, Clone)]
@@ -19,4 +21,3 @@ impl IpcBridge for NoopIpcBridge {
         Ok(())
     }
 }
-

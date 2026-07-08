@@ -1,6 +1,8 @@
 use crate::rejoin::{open_rejoin_target, LastServer};
 use anyhow::Result;
-use rfd::{MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    MessageBoxW, IDOK, MB_ICONINFORMATION, MB_OK, MB_OKCANCEL,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OverlayAction {
@@ -16,19 +18,20 @@ pub fn show_restored_overlay(last_server: Option<&LastServer>) -> Result<Overlay
         "Your VC suspension has expired.\n\nThe last server could not be identified."
     };
 
-    let result = MessageDialog::new()
-        .set_level(MessageLevel::Info)
-        .set_title("Voice chat restored")
-        .set_description(description)
-        .set_buttons(if can_rejoin {
-            MessageButtons::OkCancel
-        } else {
-            MessageButtons::Ok
-        })
-        .show();
+    let title = wide("Voice chat restored");
+    let body = wide(description);
+    let buttons = if can_rejoin { MB_OKCANCEL } else { MB_OK };
+    let result = unsafe {
+        MessageBoxW(
+            std::ptr::null_mut(),
+            body.as_ptr(),
+            title.as_ptr(),
+            buttons | MB_ICONINFORMATION,
+        )
+    };
 
     let action = match result {
-        MessageDialogResult::Ok if can_rejoin => OverlayAction::RejoinLastServer,
+        IDOK if can_rejoin => OverlayAction::RejoinLastServer,
         _ => OverlayAction::Dismiss,
     };
 
@@ -39,3 +42,6 @@ pub fn show_restored_overlay(last_server: Option<&LastServer>) -> Result<Overlay
     Ok(action)
 }
 
+fn wide(value: &str) -> Vec<u16> {
+    value.encode_utf16().chain(std::iter::once(0)).collect()
+}

@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::countdown::AnchoredCountdown;
 use crate::messages::{VoiceStatusData, VoiceStatusEnvelope, VoiceStatusErrorKind};
 
@@ -206,8 +208,10 @@ mod tests {
             },
         );
 
-        assert!(matches!(state.voice_state, VoiceState::TempSuspended { .. }));
+        assert!(matches!(
+            state.voice_state,
+            VoiceState::TempSuspended { .. }
+        ));
         assert!(state.countdown.is_some());
     }
 }
-

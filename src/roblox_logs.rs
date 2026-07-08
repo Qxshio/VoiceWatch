@@ -8,8 +8,7 @@ use std::sync::LazyLock;
 static PLACE_ID: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"(?i)(?:placeId|place_id)[":=\s]+(\d+)"#).unwrap());
 static JOB_ID: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?i)(?:gameInstanceId|jobId|game_instance_id)[":=\s]+([A-Za-z0-9\-]+)"#)
-        .unwrap()
+    Regex::new(r#"(?i)(?:gameInstanceId|jobId|game_instance_id)[":=\s]+([A-Za-z0-9\-]+)"#).unwrap()
 });
 
 pub fn recent_log_paths() -> Vec<PathBuf> {
@@ -34,7 +33,12 @@ pub fn recent_log_paths() -> Vec<PathBuf> {
         .collect::<Vec<_>>();
 
     files.sort_by_key(|(_, modified)| *modified);
-    files.into_iter().rev().take(5).map(|(path, _)| path).collect()
+    files
+        .into_iter()
+        .rev()
+        .take(5)
+        .map(|(path, _)| path)
+        .collect()
 }
 
 pub fn detect_last_server_from_logs() -> Option<LastServer> {
@@ -81,4 +85,3 @@ mod tests {
         assert_eq!(parsed.game_instance_id.as_deref(), Some("abc-def"));
     }
 }
-

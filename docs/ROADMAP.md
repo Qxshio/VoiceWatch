@@ -12,6 +12,7 @@
 - [x] Add best-effort Roblox log parser.
 - [x] Add user-clicked rejoin target helper.
 - [x] Add docs and setup scripts.
+- [x] Add Windows installer packaging and release artifact workflow.
 
 ## Next
 
@@ -31,4 +32,3 @@
 - [ ] Better multi-monitor overlay placement.
 - [ ] Localization.
 - [ ] Public extension store packaging.
-

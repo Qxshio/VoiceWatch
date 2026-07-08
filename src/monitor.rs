@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::settings::Settings;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
@@ -67,4 +69,3 @@ impl PollMonitor {
         self.backoff_until = Some(Instant::now() + duration);
     }
 }
-

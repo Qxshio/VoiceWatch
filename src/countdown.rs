@@ -64,4 +64,3 @@ mod tests {
         assert_eq!(format_remaining(Duration::from_secs(3661)), "01:01:01");
     }
 }
-

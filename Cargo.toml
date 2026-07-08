@@ -2,6 +2,7 @@
 name = "voice-watch"
 version = "0.1.0"
 edition = "2021"
+build = "build.rs"
 license = "MIT"
 description = "A privacy-first lightweight Windows tray app that tracks Roblox voice chat suspension timers and notifies you when VC is restored."
 readme = "README.md"
@@ -12,16 +13,25 @@ categories = ["gui", "os::windows-apis"]
 anyhow = "1.0"
 open = "5.3"
 regex = "1.11"
-rfd = { version = "0.15", default-features = false, features = ["common-controls-v6"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sysinfo = "0.30"
 tray-icon = "0.24"
 uuid = { version = "1.10", features = ["serde", "v4"] }
+windows-sys = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging"] }
 winit = "0.30"
 
 [dev-dependencies]
 tempfile = "3.12"
+
+[build-dependencies]
+winresource = "0.1"
+
+[package.metadata.winresource]
+OriginalFilename = "voice-watch.exe"
+FileDescription = "Voice Watch"
+ProductName = "Voice Watch"
+LegalCopyright = "Copyright (c) 2026 Voice Watch contributors"
 
 [profile.release]
 codegen-units = 1

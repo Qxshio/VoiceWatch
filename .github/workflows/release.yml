@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Windows artifacts
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Validate
+        shell: pwsh
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --all-targets -- -D warnings
+          cargo test
+          node --check extension/service_worker.js
+          node --check extension/connect.js
+          node -e "JSON.parse(require('fs').readFileSync('extension/manifest.json','utf8'))"
+
+      - name: Build release executable
+        run: cargo build --release
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $args = @("-SkipRustBuild")
+          if ("${{ vars.VOICE_WATCH_EXTENSION_ID }}") {
+            $args += @("-ExtensionId", "${{ vars.VOICE_WATCH_EXTENSION_ID }}")
+          }
+          .\scripts\build-installer.ps1 @args
+
+      - name: Package extension
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"').Matches.Groups[1].Value
+          Compress-Archive -Path extension\* -DestinationPath "dist\voice-watch-extension-$version.zip" -Force
+
+      - name: Checksums
+        shell: pwsh
+        run: |
+          Get-ChildItem dist -File |
+            Where-Object { $_.Name -ne "SHA256SUMS.txt" } |
+            ForEach-Object {
+              $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName
+              "$($hash.Hash.ToLowerInvariant())  $($_.Name)"
+            } | Set-Content -LiteralPath dist\SHA256SUMS.txt -Encoding ASCII
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: voice-watch-windows
+          path: dist/*
+
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" dist/* --generate-notes

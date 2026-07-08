@@ -21,6 +21,9 @@ jobs:
       - name: Test
         run: cargo test
 
+      - name: Release build
+        run: cargo build --release
+
   extension:
     name: Extension
     runs-on: ubuntu-latest

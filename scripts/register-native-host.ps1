@@ -6,12 +6,24 @@ param(
     [ValidatePattern("^[a-p]{32}$")]
     [string] $ExtensionId,
 
-    [string] $ExePath = "$PSScriptRoot\..\target\release\voice-watch.exe"
+    [string] $ExePath
 )
 
 $ErrorActionPreference = "Stop"
 
 $hostName = "com.voice_watch.native"
+
+if ([string]::IsNullOrWhiteSpace($ExePath)) {
+    $installedExe = Join-Path $PSScriptRoot "..\voice-watch.exe"
+    $devExe = Join-Path $PSScriptRoot "..\target\release\voice-watch.exe"
+    if (Test-Path -LiteralPath $installedExe) {
+        $ExePath = $installedExe
+    }
+    else {
+        $ExePath = $devExe
+    }
+}
+
 $resolvedExePath = [System.IO.Path]::GetFullPath($ExePath)
 
 if (-not (Test-Path -LiteralPath $resolvedExePath)) {

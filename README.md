@@ -56,8 +56,15 @@ packaged installer are planned follow-up work.
 ## Requirements
 
 - Windows 10 or newer
+
+Regular users should download the installer from GitHub Releases. Rust is only
+needed for contributors.
+
+Contributor requirements:
+
 - Rust stable toolchain
 - Chrome or Edge for extension development
+- Inno Setup 6 for building the Windows installer
 
 Install Rust from <https://rustup.rs/> if `cargo` is not available.
 
@@ -76,6 +83,21 @@ cargo run -- --print-config-path
 ```
 
 The settings file is created under `%APPDATA%\Voice Watch\settings.json`.
+
+## Install from release
+
+Download `VoiceWatch-<version>-Setup.exe` from
+<https://github.com/Qxshio/VoiceWatch/releases>.
+
+The installer:
+
+- installs Voice Watch for the current Windows user,
+- adds Start menu shortcuts,
+- optionally creates a desktop shortcut,
+- installs bundled extension/setup files for reference.
+
+Prebuilt standalone binaries are also attached to each release for users who
+prefer not to run an installer.
 
 Default settings:
 
@@ -174,6 +196,8 @@ cargo fmt --all
 cargo clippy --all-targets -- -D warnings
 cargo test
 ```
+
+Release packaging notes live in [docs/RELEASING.md](docs/RELEASING.md).
 
 ## License
 
