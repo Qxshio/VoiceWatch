@@ -181,7 +181,9 @@ impl TrayApp {
                 self.refresh_menu_labels();
             }
             "connect" => {
-                let _ = open::that("extension/connect.html");
+                if let Ok(path) = extension_setup_page() {
+                    let _ = open::that(path);
+                }
             }
             "settings" => {
                 if let Ok(path) = settings::settings_path() {
@@ -215,6 +217,21 @@ impl ApplicationHandler<UserEvent> for TrayApp {
         _event: WindowEvent,
     ) {
     }
+}
+
+fn extension_setup_page() -> Result<std::path::PathBuf> {
+    let exe_path = std::env::current_exe().context("failed to locate Voice Watch executable")?;
+    let app_dir = exe_path
+        .parent()
+        .context("Voice Watch executable has no parent directory")?;
+    let installed_setup = app_dir.join("extension").join("setup.html");
+    if installed_setup.exists() {
+        return Ok(installed_setup);
+    }
+
+    Ok(std::env::current_dir()?
+        .join("extension")
+        .join("setup.html"))
 }
 
 fn make_icon() -> Result<Icon> {

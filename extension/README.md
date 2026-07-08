@@ -21,3 +21,7 @@ app.
 ```powershell
 .\scripts\register-native-host.ps1 -ExtensionId "your-extension-id" -Browser Both
 ```
+
+Do not open `connect.html` directly from the file system. It is the extension
+popup and only has access to browser extension APIs after Chrome or Edge loads
+this folder as an extension.

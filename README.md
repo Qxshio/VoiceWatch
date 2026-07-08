@@ -134,6 +134,9 @@ Default settings:
 
 7. Click the Voice Watch extension and choose **Connect**.
 
+Do not open `extension/connect.html` directly from the file system. It only works
+inside the installed browser extension.
+
 To remove the native messaging registration:
 
 ```powershell

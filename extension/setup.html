@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Voice Watch setup</title>
+    <link rel="stylesheet" href="setup.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <span class="mark" aria-hidden="true"></span>
+        <div>
+          <h1>Voice Watch setup</h1>
+          <p>Load the browser connector, then open it from the extensions menu.</p>
+        </div>
+      </header>
+
+      <ol>
+        <li>Open Chrome or Edge extensions.</li>
+        <li>Turn on developer mode.</li>
+        <li>Choose Load unpacked and select this folder.</li>
+        <li>Click the Voice Watch extension icon and press Connect.</li>
+      </ol>
+
+      <section class="actions" aria-label="Setup actions">
+        <button id="open-folder" type="button">Open folder</button>
+        <button id="copy-path" type="button">Copy path</button>
+      </section>
+
+      <pre id="path" aria-live="polite"></pre>
+    </main>
+
+    <script src="setup.js"></script>
+  </body>
+</html>
