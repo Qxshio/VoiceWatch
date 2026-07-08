@@ -1,0 +1,21 @@
+# Rust
+/target/
+
+# Local app/runtime files
+*.log
+*.tmp
+*.bak
+/dist/
+/native-host-manifest.local.json
+
+# Editor and OS files
+.idea/
+.vscode/
+*.swp
+*.swo
+Thumbs.db
+Desktop.ini
+
+# Browser extension packaging
+/extension/*.zip
+/extension/key.pem

@@ -1,0 +1,83 @@
+:root {
+  color-scheme: dark;
+  font-family: Inter, "Segoe UI", system-ui, sans-serif;
+  background: #14161a;
+  color: #f4f7fb;
+}
+
+body {
+  width: 360px;
+  margin: 0;
+  background: #14161a;
+}
+
+.panel {
+  padding: 18px;
+}
+
+header {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.mark {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: #2ab878;
+  box-shadow: inset 0 0 0 6px rgba(255, 255, 255, 0.12);
+}
+
+h1 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+p {
+  margin: 3px 0 0;
+  color: #aeb7c4;
+  font-size: 12px;
+}
+
+.actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+button {
+  height: 36px;
+  border: 0;
+  border-radius: 7px;
+  font: inherit;
+  font-weight: 650;
+  color: #07130e;
+  background: #2ab878;
+  cursor: pointer;
+}
+
+button + button {
+  color: #f4f7fb;
+  background: #2b3038;
+}
+
+button:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+pre {
+  min-height: 88px;
+  margin: 14px 0 0;
+  padding: 12px;
+  overflow: auto;
+  border-radius: 7px;
+  background: #0d0f12;
+  color: #c7d1dc;
+  font: 12px/1.45 "Cascadia Mono", Consolas, monospace;
+  white-space: pre-wrap;
+}
+

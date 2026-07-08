@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Voice Watch</title>
+    <link rel="stylesheet" href="connect.css">
+  </head>
+  <body>
+    <main class="panel">
+      <header>
+        <span class="mark" aria-hidden="true"></span>
+        <div>
+          <h1>Voice Watch</h1>
+          <p id="connection">Checking connection...</p>
+        </div>
+      </header>
+
+      <section class="actions" aria-label="Connection actions">
+        <button id="connect" type="button">Connect</button>
+        <button id="check" type="button">Check now</button>
+      </section>
+
+      <pre id="result" aria-live="polite"></pre>
+    </main>
+
+    <script src="connect.js"></script>
+  </body>
+</html>

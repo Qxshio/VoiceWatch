@@ -1,0 +1,97 @@
+# Native Messaging
+
+Voice Watch uses Chrome/Edge native messaging to connect the browser extension
+to the local desktop app.
+
+## Host name
+
+```text
+com.voice_watch.native
+```
+
+## Registration
+
+During development, build the app and register the host for the extension ID:
+
+```powershell
+cargo build --release
+.\scripts\register-native-host.ps1 -ExtensionId "your-extension-id" -Browser Both
+```
+
+The script writes a native messaging manifest under:
+
+```text
+%LOCALAPPDATA%\VoiceWatch\native-messaging\com.voice_watch.native.json
+```
+
+It then registers that manifest under the current user's Chrome and/or Edge
+registry keys.
+
+Chrome starts the executable listed in the manifest and passes the calling
+extension origin as the first argument, for example
+`chrome-extension://<extension-id>`. Voice Watch treats that argument as native
+host mode. The explicit `--native-host` flag is still available for manual
+testing.
+
+## Protocol
+
+Extension to host:
+
+```json
+{
+  "type": "hello",
+  "extensionVersion": "0.1.0",
+  "protocolVersion": 1
+}
+```
+
+Host to extension:
+
+```json
+{
+  "type": "hello_ack",
+  "appVersion": "0.1.0",
+  "protocolVersion": 1,
+  "pollIntervalSeconds": 10
+}
+```
+
+App request to extension:
+
+```json
+{
+  "type": "check_voice_status",
+  "requestId": "uuid"
+}
+```
+
+Extension response:
+
+```json
+{
+  "type": "voice_status",
+  "requestId": "uuid",
+  "checkedAt": 1783548000000,
+  "ok": true,
+  "data": {
+    "isVoiceEnabled": false,
+    "isUserOptIn": true,
+    "isUserEligible": false,
+    "isBanned": true,
+    "banReason": 7,
+    "bannedUntilMs": 1783549092985,
+    "denialReason": 6
+  }
+}
+```
+
+Errors use the same `voice_status` envelope with `ok: false`.
+
+## Frame format
+
+Chrome and Edge native messaging frames are:
+
+1. Four-byte little-endian unsigned payload length.
+2. UTF-8 JSON payload.
+
+`src/native_messaging.rs` caps frames at 1 MiB.
