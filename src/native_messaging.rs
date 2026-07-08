@@ -1,3 +1,4 @@
+use crate::ipc;
 use crate::messages::{
     AppMessage, ExtensionMessage, VoiceStatusEnvelope, NATIVE_HOST_NAME, PROTOCOL_VERSION,
 };
@@ -24,6 +25,7 @@ pub fn run_native_host() -> Result<()> {
             ExtensionMessage::Hello {
                 protocol_version, ..
             } if protocol_version == PROTOCOL_VERSION => {
+                let _ = ipc::publish_extension_connected();
                 write_json(
                     &mut writer,
                     &AppMessage::HelloAck {
@@ -46,13 +48,13 @@ pub fn run_native_host() -> Result<()> {
                 )?;
             }
             ExtensionMessage::VoiceStatus(envelope) => {
-                // The tray app IPC bridge will consume this in the next milestone. For now the
-                // host acknowledges sanitized status so extension development can proceed safely.
+                let request_id = envelope.request_id.clone();
+                let accepted = ipc::publish_voice_status(envelope).is_ok();
                 write_json(
                     &mut writer,
                     &AppMessage::StatusAck {
-                        request_id: Some(envelope.request_id),
-                        accepted: true,
+                        request_id: Some(request_id),
+                        accepted,
                     },
                 )?;
             }

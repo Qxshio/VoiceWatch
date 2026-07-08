@@ -20,15 +20,22 @@
         <li>Open Chrome or Edge extensions.</li>
         <li>Turn on developer mode.</li>
         <li>Choose Load unpacked and select this folder.</li>
+        <li>Copy the generated extension ID.</li>
+        <li>Register native messaging with that ID if Connect cannot find the desktop app.</li>
         <li>Click the Voice Watch extension icon and press Connect.</li>
       </ol>
+
+      <label for="extension-id">Extension ID</label>
+      <input id="extension-id" type="text" spellcheck="false" placeholder="Paste extension ID">
 
       <section class="actions" aria-label="Setup actions">
         <button id="open-folder" type="button">Open folder</button>
         <button id="copy-path" type="button">Copy path</button>
+        <button id="copy-command" type="button">Copy command</button>
       </section>
 
       <pre id="path" aria-live="polite"></pre>
+      <pre id="command" aria-live="polite"></pre>
     </main>
 
     <script src="setup.js"></script>

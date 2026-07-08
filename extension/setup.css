@@ -48,8 +48,29 @@ ol {
   line-height: 1.8;
 }
 
+label {
+  display: block;
+  margin-bottom: 7px;
+  color: #aeb7c4;
+  font-size: 13px;
+}
+
+input {
+  width: 100%;
+  box-sizing: border-box;
+  height: 38px;
+  margin-bottom: 14px;
+  padding: 0 12px;
+  border: 1px solid #353b45;
+  border-radius: 7px;
+  background: #0d0f12;
+  color: #f4f7fb;
+  font: 13px "Cascadia Mono", Consolas, monospace;
+}
+
 .actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
 }
 

@@ -1,5 +1,6 @@
 use crate::app_state::{AppState, VoiceState};
 use crate::countdown::{format_remaining, now_wall_clock_ms};
+use crate::ipc::{self, IpcEvent};
 use crate::messages::VoiceStatusData;
 use crate::overlay;
 use crate::process;
@@ -19,7 +20,10 @@ use winit::window::WindowId;
 #[derive(Debug, Clone)]
 enum UserEvent {
     Menu(MenuEvent),
+    Ipc(IpcEvent),
 }
+
+const EXTENSION_CONNECTION_MAX_AGE: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 
 pub fn run_tray_app() -> Result<()> {
     let settings = settings::load_settings().context("failed to load settings")?;
@@ -30,6 +34,21 @@ pub fn run_tray_app() -> Result<()> {
     MenuEvent::set_event_handler(Some(move |event| {
         let _ = proxy.send_event(UserEvent::Menu(event));
     }));
+
+    let ipc_proxy = event_loop.create_proxy();
+    std::thread::spawn(move || {
+        let mut offset = ipc::event_log_len();
+        loop {
+            std::thread::sleep(Duration::from_millis(750));
+            let Ok((new_offset, events)) = ipc::read_events_since(offset) else {
+                continue;
+            };
+            offset = new_offset;
+            for event in events {
+                let _ = ipc_proxy.send_event(UserEvent::Ipc(event));
+            }
+        }
+    });
 
     let mut app = TrayApp::new(settings);
     event_loop.run_app(&mut app)?;
@@ -92,8 +111,13 @@ struct TrayApp {
 
 impl TrayApp {
     fn new(_settings: settings::Settings) -> Self {
+        let mut state = AppState::default();
+        if ipc::extension_recently_connected(EXTENSION_CONNECTION_MAX_AGE) {
+            state.mark_connected();
+        }
+
         Self {
-            state: AppState::default(),
+            state,
             tray_icon: None,
             status_item: None,
             countdown_item: None,
@@ -181,7 +205,10 @@ impl TrayApp {
                 self.refresh_menu_labels();
             }
             "connect" => {
-                if let Ok(path) = extension_setup_page() {
+                if ipc::extension_recently_connected(EXTENSION_CONNECTION_MAX_AGE) {
+                    self.state.mark_connected();
+                    self.refresh_menu_labels();
+                } else if let Ok(path) = extension_setup_page() {
                     let _ = open::that(path);
                 }
             }
@@ -192,6 +219,18 @@ impl TrayApp {
             }
             _ => {}
         }
+    }
+
+    fn handle_ipc(&mut self, event: IpcEvent) {
+        match event {
+            IpcEvent::ExtensionConnected { .. } => {
+                self.state.mark_connected();
+            }
+            IpcEvent::VoiceStatus { envelope, .. } => {
+                self.state.apply_voice_status(envelope);
+            }
+        }
+        self.refresh_menu_labels();
     }
 }
 
@@ -207,6 +246,7 @@ impl ApplicationHandler<UserEvent> for TrayApp {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
             UserEvent::Menu(menu_event) => self.handle_menu(event_loop, menu_event),
+            UserEvent::Ipc(ipc_event) => self.handle_ipc(ipc_event),
         }
     }
 

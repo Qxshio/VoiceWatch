@@ -5,10 +5,12 @@ const VOICE_SETTINGS_URL = "https://voice.roblox.com/v1/settings";
 let nativePort = null;
 let nativeStatus = {
   connected: false,
+  connecting: false,
   lastError: null,
   appVersion: null,
   pollIntervalSeconds: 10
 };
+let connectWaiters = [];
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.storage.local.set({ nativeStatus });
@@ -26,10 +28,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 async function handleRuntimeMessage(message) {
   switch (message?.type) {
     case "connect_native":
-      connectNative();
-      return { ok: true, nativeStatus };
+      return connectNative();
     case "check_now": {
-      connectNative();
+      const connection = await connectNative();
+      if (!connection.ok) {
+        return connection;
+      }
       const requestId = crypto.randomUUID();
       const status = await fetchVoiceStatus(requestId);
       postNative(status);
@@ -44,41 +48,98 @@ async function handleRuntimeMessage(message) {
 
 function connectNative() {
   if (nativePort) {
-    return nativePort;
+    if (nativeStatus.connected) {
+      return Promise.resolve({ ok: true, nativeStatus });
+    }
+
+    return new Promise((resolve) => {
+      connectWaiters.push(resolve);
+    });
   }
 
-  nativePort = chrome.runtime.connectNative(HOST_NAME);
-  nativePort.onMessage.addListener(handleNativeMessage);
-  nativePort.onDisconnect.addListener(() => {
+  try {
+    nativePort = chrome.runtime.connectNative(HOST_NAME);
+  } catch (error) {
     nativeStatus = {
       ...nativeStatus,
+      connecting: false,
       connected: false,
-      lastError: chrome.runtime.lastError?.message || null
+      lastError: error.message || String(error)
+    };
+    chrome.storage.local.set({ nativeStatus });
+    return Promise.resolve({ ok: false, nativeStatus });
+  }
+
+  nativePort.onMessage.addListener(handleNativeMessage);
+  nativePort.onDisconnect.addListener(() => {
+    const lastError = chrome.runtime.lastError?.message || "Native host disconnected.";
+    nativeStatus = {
+      ...nativeStatus,
+      connecting: false,
+      connected: false,
+      lastError
     };
     nativePort = null;
     chrome.storage.local.set({ nativeStatus });
+    resolveConnectWaiters({ ok: false, nativeStatus });
   });
 
-  postNative({
-    type: "hello",
-    extensionVersion: chrome.runtime.getManifest().version,
-    protocolVersion: PROTOCOL_VERSION
-  });
-
-  nativeStatus = { ...nativeStatus, connected: true, lastError: null };
+  nativeStatus = {
+    ...nativeStatus,
+    connecting: true,
+    connected: false,
+    lastError: null
+  };
   chrome.storage.local.set({ nativeStatus });
-  return nativePort;
+
+  try {
+    nativePort.postMessage({
+      type: "hello",
+      extensionVersion: chrome.runtime.getManifest().version,
+      protocolVersion: PROTOCOL_VERSION
+    });
+  } catch (error) {
+    nativeStatus = {
+      ...nativeStatus,
+      connecting: false,
+      connected: false,
+      lastError: error.message || String(error)
+    };
+    nativePort = null;
+    chrome.storage.local.set({ nativeStatus });
+    return Promise.resolve({ ok: false, nativeStatus });
+  }
+
+  return new Promise((resolve) => {
+    connectWaiters.push(resolve);
+    setTimeout(() => {
+      if (nativeStatus.connected) {
+        resolve({ ok: true, nativeStatus });
+      } else {
+        nativeStatus = {
+          ...nativeStatus,
+          connecting: false,
+          connected: false,
+          lastError: nativeStatus.lastError || "Timed out waiting for the desktop app."
+        };
+        chrome.storage.local.set({ nativeStatus });
+        resolveConnectWaiters({ ok: false, nativeStatus });
+      }
+    }, 2500);
+  });
 }
 
 function handleNativeMessage(message) {
   if (message?.type === "hello_ack") {
     nativeStatus = {
+      connecting: false,
       connected: true,
       lastError: null,
       appVersion: message.appVersion,
       pollIntervalSeconds: message.pollIntervalSeconds ?? 10
     };
     chrome.storage.local.set({ nativeStatus });
+    resolveConnectWaiters({ ok: true, nativeStatus });
     return;
   }
 
@@ -96,6 +157,13 @@ function postNative(message) {
     connectNative();
   }
   nativePort.postMessage(message);
+}
+
+function resolveConnectWaiters(result) {
+  const waiters = connectWaiters.splice(0);
+  for (const resolve of waiters) {
+    resolve(result);
+  }
 }
 
 async function fetchVoiceStatus(requestId) {
