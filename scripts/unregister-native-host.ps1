@@ -28,7 +28,8 @@ function Get-BrowserRegistryPaths {
         Vivaldi = "HKCU:\Software\Vivaldi\NativeMessagingHosts\$hostName"
         Opera = @(
             "HKCU:\Software\Google\Chrome\NativeMessagingHosts\$hostName",
-            "HKCU:\Software\Opera Software\Opera Stable\NativeMessagingHosts\$hostName"
+            "HKCU:\Software\Opera Software\Opera Stable\NativeMessagingHosts\$hostName",
+            "HKCU:\Software\Opera Software\Opera GX Stable\NativeMessagingHosts\$hostName"
         )
         Chromium = "HKCU:\Software\Chromium\NativeMessagingHosts\$hostName"
     }

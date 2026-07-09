@@ -30,7 +30,7 @@ browser registry keys.
 Opera is also registered through the Chrome-compatible native messaging key.
 Opera's Windows native messaging documentation points to the Chrome registry
 location, so Voice Watch writes both that key and the Opera-specific key for
-compatibility.
+compatibility. Opera GX also gets an Opera GX-specific fallback registry key.
 
 The browser starts the executable listed in the manifest and passes the calling
 extension origin as the first argument, for example
@@ -45,7 +45,7 @@ Extension to host:
 ```json
 {
   "type": "hello",
-  "extensionVersion": "0.1.3",
+  "extensionVersion": "0.1.4",
   "protocolVersion": 1
 }
 ```
@@ -55,7 +55,7 @@ Host to extension:
 ```json
 {
   "type": "hello_ack",
-  "appVersion": "0.1.3",
+  "appVersion": "0.1.4",
   "protocolVersion": 1,
   "pollIntervalSeconds": 10
 }

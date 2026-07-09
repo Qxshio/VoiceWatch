@@ -62,8 +62,8 @@ fn main() -> Result<()> {
 }
 
 fn is_browser_native_host_invocation(args: &[String]) -> bool {
-    args.first()
-        .is_some_and(|first| first.starts_with("chrome-extension://"))
+    args.iter()
+        .any(|arg| arg.starts_with("chrome-extension://"))
 }
 
 fn handle_protocol_url(url: &str) -> Result<()> {
@@ -134,4 +134,36 @@ Usage:\n\
                                        Demo countdown and restore notification\n\
   voice-watch.exe --print-config-path  Print the settings file location\n"
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_host_invocation_accepts_origin_first() {
+        let args = vec![
+            "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/".to_string(),
+            "--parent-window=1234".to_string(),
+        ];
+
+        assert!(is_browser_native_host_invocation(&args));
+    }
+
+    #[test]
+    fn native_host_invocation_accepts_origin_after_parent_window() {
+        let args = vec![
+            "--parent-window=1234".to_string(),
+            "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/".to_string(),
+        ];
+
+        assert!(is_browser_native_host_invocation(&args));
+    }
+
+    #[test]
+    fn native_host_invocation_rejects_normal_app_args() {
+        let args = vec!["--print-config-path".to_string()];
+
+        assert!(!is_browser_native_host_invocation(&args));
+    }
 }

@@ -40,6 +40,7 @@ impl BrowserTarget {
             vivaldi_registry_path(),
             opera_chromium_registry_path(),
             opera_registry_path(),
+            opera_gx_registry_path(),
             chromium_registry_path(),
         ];
 
@@ -49,7 +50,11 @@ impl BrowserTarget {
             Self::Edge => vec![edge_registry_path()],
             Self::Brave => vec![brave_registry_path()],
             Self::Vivaldi => vec![vivaldi_registry_path()],
-            Self::Opera => vec![opera_chromium_registry_path(), opera_registry_path()],
+            Self::Opera => vec![
+                opera_chromium_registry_path(),
+                opera_registry_path(),
+                opera_gx_registry_path(),
+            ],
             Self::Chromium => vec![chromium_registry_path()],
         }
     }
@@ -269,6 +274,10 @@ fn opera_registry_path() -> &'static str {
     r"Software\Opera Software\Opera Stable\NativeMessagingHosts\com.voice_watch.native"
 }
 
+fn opera_gx_registry_path() -> &'static str {
+    r"Software\Opera Software\Opera GX Stable\NativeMessagingHosts\com.voice_watch.native"
+}
+
 fn opera_chromium_registry_path() -> &'static str {
     chrome_registry_path()
 }
@@ -311,6 +320,21 @@ mod tests {
 
         assert!(paths.contains(&chrome_registry_path()));
         assert!(paths.contains(&opera_registry_path()));
+        assert!(paths.contains(&opera_gx_registry_path()));
+    }
+
+    #[test]
+    fn all_browser_registration_paths_are_deduplicated() {
+        let paths = dedup_registry_paths(BrowserTarget::All.registry_paths());
+
+        assert_eq!(paths.len(), BrowserTarget::All.registry_paths().len() - 1);
+        assert_eq!(
+            paths
+                .iter()
+                .filter(|path| **path == chrome_registry_path())
+                .count(),
+            1
+        );
     }
 
     #[test]
