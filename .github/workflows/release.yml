@@ -106,4 +106,16 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" dist/* --title "Voice Watch ${{ github.ref_name }} Open Beta" --generate-notes --prerelease
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $title = "Voice Watch $tag Open Beta"
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release edit $tag --title $title --prerelease
+            if ($LASTEXITCODE -ne 0) { throw "Failed to update release metadata." }
+            gh release upload $tag dist/* --clobber
+            if ($LASTEXITCODE -ne 0) { throw "Failed to upload release artifacts." }
+          } else {
+            gh release create $tag dist/* --title $title --generate-notes --prerelease
+            if ($LASTEXITCODE -ne 0) { throw "Failed to create release." }
+          }

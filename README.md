@@ -36,6 +36,10 @@ The installer:
 Prebuilt standalone binaries are also attached to each release for users who
 prefer not to run an installer.
 
+Release builds statically link the Microsoft C runtime, so fresh Windows
+systems do not need a separate Visual C++ Redistributable install just to start
+Voice Watch.
+
 ## The problem Voice Watch solves
 
 Roblox voice chat suspensions can leave you guessing. The Roblox client may keep
