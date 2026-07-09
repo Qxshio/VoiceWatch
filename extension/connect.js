@@ -63,8 +63,10 @@ function renderStatus(response) {
       ? `Voice Watch ${nativeStatus.appVersion}`
       : "Connected";
     desktopDetail.textContent =
-      nativeStatus.pollPausedMessage ||
-      `Checking about every ${nativeStatus.pollIntervalSeconds ?? 10} seconds.`;
+      nativeStatus.robloxLoggedIn === false
+        ? "Desktop bridge is ready. Roblox is logged out in this browser."
+        : nativeStatus.pollPausedMessage ||
+          `Checking about every ${nativeStatus.pollIntervalSeconds ?? 10} seconds.`;
     disconnectButton.hidden = false;
   } else if (nativeStatus?.connecting) {
     connection.textContent = "Connecting to desktop app...";
@@ -83,6 +85,18 @@ function renderStatus(response) {
 }
 
 function renderVoiceStatus(envelope, nativeStatus) {
+  if (isLoggedOut(envelope, nativeStatus)) {
+    voiceStatus.textContent = "Logged out";
+    voiceDetail.textContent = "Log in to Roblox in this browser, then Voice Watch will resume checks.";
+    lastChecked.textContent = Number.isFinite(envelope?.checkedAt)
+      ? formatDateTime(envelope.checkedAt)
+      : "--";
+    lastDetail.textContent = Number.isFinite(envelope?.checkedAt)
+      ? "Roblox account check completed."
+      : "Waiting for Roblox login.";
+    return;
+  }
+
   if (nativeStatus?.microphoneActive) {
     voiceStatus.textContent = "Active";
     voiceDetail.textContent = "Roblox is using your microphone, so web checks are paused.";
@@ -113,8 +127,12 @@ function renderVoiceStatus(envelope, nativeStatus) {
   lastDetail.textContent = envelope.ok ? "Roblox replied." : "Check did not complete.";
 
   if (!envelope.ok) {
-    voiceStatus.textContent = "Needs attention";
-    voiceDetail.textContent = envelope.error?.message || "Voice status check failed.";
+    const kind = envelope.error?.kind;
+    voiceStatus.textContent = kind === "rate_limited" ? "Rate limited" : "Needs attention";
+    voiceDetail.textContent =
+      kind === "rate_limited"
+        ? "Roblox asked Voice Watch to slow down briefly."
+        : envelope.error?.message || "Voice status check failed.";
     return;
   }
 
@@ -135,6 +153,10 @@ function renderVoiceStatus(envelope, nativeStatus) {
 
   voiceStatus.textContent = "Unavailable";
   voiceDetail.textContent = "Roblox says voice chat is not available for this session.";
+}
+
+function isLoggedOut(envelope, nativeStatus) {
+  return nativeStatus?.robloxLoggedIn === false || envelope?.error?.kind === "auth_error";
 }
 
 function formatDateTime(value) {

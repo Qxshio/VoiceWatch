@@ -16,7 +16,8 @@ let nativeStatus = {
   pollPausedMessage: null,
   robloxRunning: null,
   robloxPlaying: null,
-  microphoneActive: null
+  microphoneActive: null,
+  robloxLoggedIn: null
 };
 let lastVoiceStatus = null;
 let connectWaiters = [];
@@ -266,7 +267,8 @@ function handleNativeMessage(message) {
       pollPausedMessage: null,
       robloxRunning: null,
       robloxPlaying: null,
-      microphoneActive: null
+      microphoneActive: null,
+      robloxLoggedIn: null
     };
     persistStatus();
     resolveConnectWaiters({ ok: true, nativeStatus });
@@ -488,11 +490,20 @@ async function refreshCurrentPresence(force) {
   lastPresenceRefreshAtMs = now;
 
   const userId = await authenticatedUserId();
-  if (!userId) {
+  if (userId === null) {
+    await rememberLoggedOut();
     return { ok: false, error: "Roblox user is not signed in." };
+  }
+  if (!userId) {
+    return { ok: false, error: "Roblox login status could not be confirmed." };
   }
 
   const response = await fetchPresence(userId);
+  if (response.status === 401 || response.status === 403) {
+    currentUserId = null;
+    await rememberLoggedOut();
+    return { ok: false, error: "Roblox user is not signed in." };
+  }
   if (!response.ok) {
     return { ok: false, error: `Roblox presence returned HTTP ${response.status}.` };
   }
@@ -531,30 +542,48 @@ function fetchPresenceWithHeaders(userId, extraHeaders) {
 }
 
 async function authenticatedUserId() {
-  if (currentUserId) {
-    return currentUserId;
+  let response;
+  try {
+    response = await fetch(AUTHENTICATED_USER_URL, {
+      credentials: "include",
+      cache: "no-store",
+      headers: {
+        "Accept": "application/json"
+      }
+    });
+  } catch (_error) {
+    return currentUserId || undefined;
   }
-
-  const response = await fetch(AUTHENTICATED_USER_URL, {
-    credentials: "include",
-    cache: "no-store",
-    headers: {
-      "Accept": "application/json"
-    }
-  });
   if (response.status === 401 || response.status === 403) {
+    currentUserId = null;
     return null;
   }
   if (!response.ok) {
-    return null;
+    return currentUserId || undefined;
   }
 
   const body = await response.json();
   const id = optionalInteger(body?.id);
   if (id) {
     currentUserId = id;
+    if (nativeStatus.robloxLoggedIn !== true) {
+      nativeStatus = { ...nativeStatus, robloxLoggedIn: true };
+      await persistStatus();
+    }
   }
   return currentUserId;
+}
+
+async function rememberLoggedOut() {
+  nativeStatus = { ...nativeStatus, robloxLoggedIn: false };
+  const envelope = errorEnvelope(
+    newRequestId(),
+    "auth_error",
+    "Please log in to Roblox in this browser."
+  );
+  await rememberVoiceStatus(envelope);
+  postNative(envelope);
+  return persistStatus();
 }
 
 function serverFromPresence(presence) {
@@ -653,6 +682,9 @@ async function fetchVoiceStatus(requestId) {
   }
 
   if (response.status === 401 || response.status === 403) {
+    currentUserId = null;
+    nativeStatus = { ...nativeStatus, robloxLoggedIn: false };
+    await persistStatus();
     return errorEnvelope(
       requestId,
       "auth_error",
@@ -678,6 +710,11 @@ async function fetchVoiceStatus(requestId) {
       `Roblox voice status request failed with HTTP ${response.status}.`,
       checkedAt
     );
+  }
+
+  if (nativeStatus.robloxLoggedIn !== true) {
+    nativeStatus = { ...nativeStatus, robloxLoggedIn: true };
+    await persistStatus();
   }
 
   let body;

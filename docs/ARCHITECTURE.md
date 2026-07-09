@@ -99,7 +99,7 @@ VoiceOk
 TempSuspended
 SuspendedUnknownDuration
 Ineligible
-AuthError
+AuthError (shown as Logged out)
 NetworkError
 RateLimited
 Restored
@@ -108,3 +108,5 @@ Restored
 The app renders countdowns locally from `bannedUntilMs`. When the countdown
 reaches zero, the tray app moves directly into the restored HUD state and keeps
 the next browser status check as a correction path if Roblox later disagrees.
+Roblox browser authentication failures are still treated as an active desktop
+connection; both the tray and extension render them as `Logged out`.

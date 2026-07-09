@@ -54,7 +54,7 @@ impl VoiceState {
             VoiceState::TempSuspended { .. } => "Voice chat suspended".into(),
             VoiceState::SuspendedUnknownDuration { .. } => "Suspended, duration unknown".into(),
             VoiceState::Ineligible { .. } => "Voice chat unavailable".into(),
-            VoiceState::AuthError { .. } => "Browser session not connected".into(),
+            VoiceState::AuthError { .. } => "Logged out".into(),
             VoiceState::NetworkError { .. } => "Network error".into(),
             VoiceState::RateLimited { .. } => "Rate limited".into(),
             VoiceState::Restored { .. } => "Voice chat restored".into(),
@@ -231,6 +231,7 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::messages::VoiceStatusError;
 
     #[test]
     fn banned_status_starts_countdown() {
@@ -253,5 +254,25 @@ mod tests {
             VoiceState::TempSuspended { .. }
         ));
         assert!(state.countdown.is_some());
+    }
+
+    #[test]
+    fn auth_error_keeps_browser_connected_and_shows_logged_out() {
+        let mut state = AppState::default();
+        state.apply_voice_status(VoiceStatusEnvelope {
+            request_id: "auth-check".into(),
+            checked_at: 100,
+            ok: false,
+            data: None,
+            error: Some(VoiceStatusError {
+                kind: VoiceStatusErrorKind::AuthError,
+                message: "Please log in to Roblox in this browser.".into(),
+                retry_after_ms: None,
+            }),
+        });
+
+        assert!(state.is_browser_connected());
+        assert!(matches!(state.voice_state, VoiceState::AuthError { .. }));
+        assert_eq!(state.voice_state.label(), "Logged out");
     }
 }
