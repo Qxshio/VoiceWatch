@@ -18,20 +18,39 @@ pub enum IpcEvent {
     ExtensionConnected {
         connected_at_ms: i64,
     },
+    ExtensionDisconnected {
+        disconnected_at_ms: i64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExtensionConnectionState {
     pub last_connected_at_ms: i64,
+    #[serde(default)]
+    pub last_disconnected_at_ms: Option<i64>,
 }
 
 pub fn publish_extension_connected() -> Result<()> {
     let connected_at_ms = now_wall_clock_ms();
     write_connection_state(&ExtensionConnectionState {
         last_connected_at_ms: connected_at_ms,
+        last_disconnected_at_ms: None,
     })?;
     publish_event(&IpcEvent::ExtensionConnected { connected_at_ms })
+}
+
+pub fn publish_extension_disconnected() -> Result<()> {
+    let disconnected_at_ms = now_wall_clock_ms();
+    let last_connected_at_ms = read_connection_state()
+        .map(|state| state.last_connected_at_ms)
+        .unwrap_or_default();
+
+    write_connection_state(&ExtensionConnectionState {
+        last_connected_at_ms,
+        last_disconnected_at_ms: Some(disconnected_at_ms),
+    })?;
+    publish_event(&IpcEvent::ExtensionDisconnected { disconnected_at_ms })
 }
 
 pub fn publish_voice_status(envelope: VoiceStatusEnvelope) -> Result<()> {
@@ -45,6 +64,13 @@ pub fn extension_recently_connected(max_age: Duration) -> bool {
     let Ok(state) = read_connection_state() else {
         return false;
     };
+
+    if state
+        .last_disconnected_at_ms
+        .is_some_and(|disconnected_at_ms| disconnected_at_ms >= state.last_connected_at_ms)
+    {
+        return false;
+    }
 
     let now = now_wall_clock_ms();
     let age_ms = now.saturating_sub(state.last_connected_at_ms);

@@ -1,7 +1,7 @@
 # Native Messaging
 
-Voice Watch uses Chrome/Edge native messaging to connect the browser extension
-to the local desktop app.
+Voice Watch uses Chromium native messaging to connect the browser extension to
+the local desktop app.
 
 ## Host name
 
@@ -15,7 +15,7 @@ During development, build the app and register the host for the extension ID:
 
 ```powershell
 cargo build --release
-.\scripts\register-native-host.ps1 -ExtensionId "your-extension-id" -Browser Both
+.\scripts\register-native-host.ps1 -ExtensionId "your-extension-id" -Browser All
 ```
 
 The script writes a native messaging manifest under:
@@ -24,10 +24,10 @@ The script writes a native messaging manifest under:
 %LOCALAPPDATA%\VoiceWatch\native-messaging\com.voice_watch.native.json
 ```
 
-It then registers that manifest under the current user's Chrome and/or Edge
-registry keys.
+It then registers that manifest under the current user's supported Chromium
+browser registry keys.
 
-Chrome starts the executable listed in the manifest and passes the calling
+The browser starts the executable listed in the manifest and passes the calling
 extension origin as the first argument, for example
 `chrome-extension://<extension-id>`. Voice Watch treats that argument as native
 host mode. The explicit `--native-host` flag is still available for manual
@@ -87,9 +87,17 @@ Extension response:
 
 Errors use the same `voice_status` envelope with `ok: false`.
 
+Intentional extension disconnect:
+
+```json
+{
+  "type": "disconnect"
+}
+```
+
 ## Frame format
 
-Chrome and Edge native messaging frames are:
+Chromium native messaging frames are:
 
 1. Four-byte little-endian unsigned payload length.
 2. UTF-8 JSON payload.

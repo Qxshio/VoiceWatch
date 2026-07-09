@@ -3,7 +3,7 @@
 Voice Watch is split into two local components:
 
 1. A Rust Windows desktop app.
-2. A Chrome/Edge Manifest V3 browser extension.
+2. A Chromium Manifest V3 browser extension.
 
 The browser extension owns authenticated Roblox API access because the browser
 already has the user's Roblox session. The desktop app owns local UX: tray menu,
@@ -23,7 +23,7 @@ sequenceDiagram
     Tray->>User: Open extension setup
     Ext->>Host: hello
     Host->>Ext: hello_ack
-    Tray->>Ext: check_voice_status
+    Ext->>Ext: Periodic status check
     Ext->>Roblox: GET /v1/settings with browser credentials
     Roblox-->>Ext: Voice settings JSON
     Ext->>Host: sanitized voice_status
@@ -39,7 +39,7 @@ native host acknowledgement; the named-pipe implementation is planned next.
 ## Rust slices
 
 - `messages.rs` defines the sanitized protocol shared by the extension and app.
-- `native_messaging.rs` reads and writes Chrome/Edge native messaging frames.
+- `native_messaging.rs` reads and writes Chromium native messaging frames.
 - `app_state.rs` owns the voice state machine.
 - `countdown.rs` keeps countdown rendering local and monotonic.
 - `monitor.rs` decides when polling should happen.

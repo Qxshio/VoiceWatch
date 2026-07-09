@@ -1,6 +1,6 @@
 param(
-    [ValidateSet("Chrome", "Edge", "Both")]
-    [string] $Browser = "Both",
+    [ValidateSet("Chrome", "Edge", "Brave", "Vivaldi", "Opera", "Chromium", "All", "Both")]
+    [string] $Browser = "All",
 
     [switch] $RemoveManifest
 )
@@ -18,12 +18,38 @@ function Remove-BrowserHost {
     }
 }
 
-if ($Browser -in @("Chrome", "Both")) {
-    Remove-BrowserHost "HKCU:\Software\Google\Chrome\NativeMessagingHosts\$hostName"
+function Get-BrowserRegistryPaths {
+    param([string] $TargetBrowser)
+
+    $paths = [ordered]@{
+        Chrome = "HKCU:\Software\Google\Chrome\NativeMessagingHosts\$hostName"
+        Edge = "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\$hostName"
+        Brave = "HKCU:\Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\$hostName"
+        Vivaldi = "HKCU:\Software\Vivaldi\NativeMessagingHosts\$hostName"
+        Opera = "HKCU:\Software\Opera Software\Opera Stable\NativeMessagingHosts\$hostName"
+        Chromium = "HKCU:\Software\Chromium\NativeMessagingHosts\$hostName"
+    }
+
+    if ($TargetBrowser -eq "Both") {
+        return @($paths.Chrome, $paths.Edge)
+    }
+
+    if ($TargetBrowser -eq "All") {
+        return @(
+            $paths.Chrome,
+            $paths.Edge,
+            $paths.Brave,
+            $paths.Vivaldi,
+            $paths.Opera,
+            $paths.Chromium
+        )
+    }
+
+    return @($paths[$TargetBrowser])
 }
 
-if ($Browser -in @("Edge", "Both")) {
-    Remove-BrowserHost "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\$hostName"
+foreach ($registryPath in (Get-BrowserRegistryPaths $Browser)) {
+    Remove-BrowserHost $registryPath
 }
 
 if ($RemoveManifest -and (Test-Path -LiteralPath $manifestPath)) {

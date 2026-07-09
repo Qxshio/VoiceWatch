@@ -47,6 +47,16 @@ pub fn run_native_host() -> Result<()> {
                     },
                 )?;
             }
+            ExtensionMessage::Disconnect => {
+                let _ = ipc::publish_extension_disconnected();
+                write_json(
+                    &mut writer,
+                    &AppMessage::StatusAck {
+                        request_id: None,
+                        accepted: true,
+                    },
+                )?;
+            }
             ExtensionMessage::VoiceStatus(envelope) => {
                 let request_id = envelope.request_id.clone();
                 let accepted = ipc::publish_voice_status(envelope).is_ok();
@@ -132,5 +142,11 @@ mod tests {
         assert!(String::from_utf8(frame)
             .unwrap()
             .contains("check_voice_status"));
+    }
+
+    #[test]
+    fn disconnect_message_decodes() {
+        let message = serde_json::from_str::<ExtensionMessage>(r#"{"type":"disconnect"}"#).unwrap();
+        assert!(matches!(message, ExtensionMessage::Disconnect));
     }
 }

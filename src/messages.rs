@@ -12,6 +12,7 @@ pub enum ExtensionMessage {
         #[serde(rename = "protocolVersion")]
         protocol_version: u32,
     },
+    Disconnect,
     VoiceStatus(VoiceStatusEnvelope),
 }
 

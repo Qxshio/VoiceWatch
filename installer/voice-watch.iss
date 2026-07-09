@@ -32,7 +32,7 @@ DisableWelcomePage=no
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
 #if ExtensionId != ""
-Name: "nativehost"; Description: "Register the browser connector for Chrome and Edge"; GroupDescription: "Browser integration:"; Flags: checkedonce
+Name: "nativehost"; Description: "Register the browser connector for supported Chromium browsers"; GroupDescription: "Browser integration:"; Flags: checkedonce
 #endif
 
 [Files]
@@ -50,11 +50,16 @@ Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDi
 
 [Run]
 #if ExtensionId != ""
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\register-native-host.ps1"" -ExtensionId ""{#ExtensionId}"" -ExePath ""{app}\{#MyAppExeName}"" -Browser Both"; Flags: runhidden; Tasks: nativehost
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\register-native-host.ps1"" -ExtensionId ""{#ExtensionId}"" -ExePath ""{app}\{#MyAppExeName}"" -Browser All"; Flags: runhidden; Tasks: nativehost
 #endif
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent unchecked
 
+[Registry]
+Root: HKCU; Subkey: "Software\Classes\voice-watch"; ValueType: string; ValueData: "URL:Voice Watch"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\voice-watch"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
+Root: HKCU; Subkey: "Software\Classes\voice-watch\shell\open\command"; ValueType: string; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
+
 #if ExtensionId != ""
 [UninstallRun]
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\unregister-native-host.ps1"" -Browser Both -RemoveManifest"; Flags: runhidden
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\unregister-native-host.ps1"" -Browser All -RemoveManifest"; Flags: runhidden
 #endif

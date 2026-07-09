@@ -37,9 +37,9 @@ The first prototype includes:
 - Rust desktop project structure with clean slices for state, settings, tray,
   native messaging, process detection, countdown logic, Roblox log parsing, and
   rejoin behavior.
-- Native messaging host mode with Chrome/Edge framing and `hello` /
+- Native messaging host mode with Chromium browser framing and `hello` /
   `hello_ack` support.
-- Manifest V3 browser extension that connects to the native host.
+- Manifest V3 browser extension that connects to the native host automatically.
 - Real extension fetch to `https://voice.roblox.com/v1/settings` using
   `credentials: "include"` and no cookie permission.
 - Sanitized voice status conversion, including `bannedUntilMs`.
@@ -50,8 +50,7 @@ The first prototype includes:
 - Development scripts for registering and unregistering the native messaging
   host.
 
-The polished Medal-style overlay, full local IPC bridge, settings UI, and
-packaged installer are planned follow-up work.
+The polished Medal-style overlay and settings UI are planned follow-up work.
 
 ## Requirements
 
@@ -63,7 +62,7 @@ needed for contributors.
 Contributor requirements:
 
 - Rust stable toolchain
-- Chrome or Edge for extension development
+- A Chromium-based browser for extension development
 - Inno Setup 6 for building the Windows installer
 
 Install Rust from <https://rustup.rs/> if `cargo` is not available.
@@ -114,7 +113,13 @@ Default settings:
 
 `pollIntervalSeconds` is clamped to 10-300 seconds.
 
-## Load the extension in Chrome or Edge
+## Load the extension in a Chromium-based browser
+
+For regular use, install Voice Watch, open the tray menu, and choose
+**Connect Roblox**. Voice Watch opens the bundled setup page only when the
+browser connector still needs to be loaded.
+
+For development:
 
 1. Build the desktop app:
 
@@ -122,17 +127,28 @@ Default settings:
    cargo build --release
    ```
 
-2. Open `chrome://extensions` or `edge://extensions`.
-3. Enable developer mode.
-4. Choose **Load unpacked** and select the `extension/` folder.
-5. Copy the generated extension ID.
-6. Register the native messaging host:
+2. Open `extension/setup.html`.
+3. Choose your browser and follow the setup page.
+4. In your browser, enable developer mode.
+5. Choose **Load unpacked** and select the `extension/` folder.
+6. Copy the generated extension ID.
+7. Paste the extension ID into the setup page and choose
+   **Register with Voice Watch**.
 
-   ```powershell
-   .\scripts\register-native-host.ps1 -ExtensionId "your-extension-id" -Browser Both
-   ```
+Manual fallback:
 
-7. Click the Voice Watch extension and choose **Connect**.
+```powershell
+cargo run -- --register-native-host "your-extension-id" --browser all
+```
+
+PowerShell fallback:
+
+```powershell
+.\scripts\register-native-host.ps1 -ExtensionId "your-extension-id" -Browser All
+```
+
+The extension popup is read-only. It shows desktop connection, VC status, and a
+disconnect button only while connected.
 
 Do not open `extension/connect.html` directly from the file system. It only works
 inside the installed browser extension.
@@ -140,7 +156,7 @@ inside the installed browser extension.
 To remove the native messaging registration:
 
 ```powershell
-.\scripts\unregister-native-host.ps1 -Browser Both -RemoveManifest
+.\scripts\unregister-native-host.ps1 -Browser All -RemoveManifest
 ```
 
 ## Rejoin last server
@@ -167,7 +183,7 @@ src/
   ipc.rs               IPC bridge abstraction for the native host/tray link
   messages.rs          Shared sanitized protocol models
   monitor.rs           Polling decisions and backoff
-  native_messaging.rs  Chrome/Edge native messaging framing
+  native_messaging.rs  Chromium native messaging framing
   overlay.rs           Restore notification adapter
   process.rs           Roblox process detection
   rejoin.rs            Last-server rejoin targets
@@ -181,6 +197,8 @@ extension/
   connect.html
   connect.css
   connect.js
+  setup.html
+  help.html
 
 scripts/
   register-native-host.ps1

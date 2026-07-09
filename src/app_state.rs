@@ -90,6 +90,11 @@ impl AppState {
         }
     }
 
+    pub fn mark_disconnected(&mut self) {
+        self.voice_state = VoiceState::Disconnected;
+        self.countdown = None;
+    }
+
     pub fn mark_checking(&mut self) {
         self.voice_state = VoiceState::Checking;
     }

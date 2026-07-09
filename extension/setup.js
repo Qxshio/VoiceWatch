@@ -1,32 +1,75 @@
+const browserSelect = document.querySelector("#browser");
 const pathOutput = document.querySelector("#path");
-const commandOutput = document.querySelector("#command");
+const registerLinkOutput = document.querySelector("#register-link");
 const extensionIdInput = document.querySelector("#extension-id");
 const idStatus = document.querySelector("#id-status");
-const openChromeButton = document.querySelector("#open-chrome");
-const openEdgeButton = document.querySelector("#open-edge");
+const openBrowserButton = document.querySelector("#open-browser");
+const browserHelpButton = document.querySelector("#browser-help");
 const openFolderButton = document.querySelector("#open-folder");
 const copyPathButton = document.querySelector("#copy-path");
-const copyCommandButton = document.querySelector("#copy-command");
+const registerButton = document.querySelector("#register");
+
+const extensionPages = {
+  all: "chrome://extensions",
+  chrome: "chrome://extensions",
+  edge: "edge://extensions",
+  brave: "brave://extensions",
+  vivaldi: "vivaldi://extensions",
+  opera: "opera://extensions",
+  chromium: "chrome://extensions"
+};
+
+const helpTargets = new Map([
+  ["chrome", "chrome"],
+  ["google chrome", "chrome"],
+  ["edge", "edge"],
+  ["microsoft edge", "edge"],
+  ["brave", "brave"],
+  ["vivaldi", "vivaldi"],
+  ["opera", "opera"],
+  ["chromium", "chromium"]
+]);
 
 const folderPath = decodeURIComponent(
   window.location.pathname.replace(/^\/([A-Za-z]:)/, "$1")
 )
   .replace(/\/setup\.html$/i, "")
   .replace(/\//g, "\\");
-const appRoot = folderPath.replace(/\\extension$/i, "");
 
 pathOutput.textContent = folderPath;
-renderCommand();
+renderRegistration();
 
-extensionIdInput.addEventListener("input", renderCommand);
+browserSelect.addEventListener("change", renderRegistration);
+extensionIdInput.addEventListener("input", renderRegistration);
 
-openChromeButton.addEventListener("click", () => {
-  window.location.href = "chrome://extensions";
+openBrowserButton.addEventListener("click", () => {
+  const browser = browserSelect.value === "all" ? askForBrowser() : browserSelect.value;
+  if (!browser) {
+    return;
+  }
+
+  window.location.href = extensionPages[browser] || extensionPages.chromium;
 });
 
-openEdgeButton.addEventListener("click", () => {
-  window.location.href = "edge://extensions";
+browserHelpButton.addEventListener("click", () => {
+  const browser = askForBrowser();
+  if (!browser) {
+    return;
+  }
+
+  window.location.href = `help.html?browser=${encodeURIComponent(browser)}`;
 });
+
+function askForBrowser() {
+  const answer = window.prompt(
+    "Which browser are you using? Examples: Chrome, Edge, Brave, Vivaldi, Opera, Chromium"
+  );
+  if (!answer) {
+    return null;
+  }
+
+  return helpTargets.get(answer.trim().toLowerCase()) || "chromium";
+}
 
 openFolderButton.addEventListener("click", () => {
   window.location.href = "./";
@@ -37,29 +80,36 @@ copyPathButton.addEventListener("click", async () => {
   pathOutput.textContent = `Copied folder path:\n${folderPath}`;
 });
 
-copyCommandButton.addEventListener("click", async () => {
-  const command = registrationCommand();
-  await copyText(command);
-  commandOutput.textContent = `Copied command:\n${command}`;
+registerButton.addEventListener("click", () => {
+  const extensionId = sanitizeExtensionId(extensionIdInput.value);
+  if (!extensionId) {
+    renderRegistration();
+    return;
+  }
+
+  const link = registrationLink(extensionId);
+  registerLinkOutput.textContent = `Opening Voice Watch setup:\n${link}`;
+  window.location.href = link;
 });
 
-function renderCommand() {
+function renderRegistration() {
   const extensionId = sanitizeExtensionId(extensionIdInput.value);
   const hasValidId = extensionId.length > 0;
 
-  extensionIdInput.value = extensionIdInput.value.trim();
   idStatus.textContent = hasValidId
     ? "Extension ID looks valid."
     : "Paste the 32-character ID from the extension card.";
   idStatus.classList.toggle("valid", hasValidId);
-  copyCommandButton.disabled = !hasValidId;
-  commandOutput.textContent = registrationCommand();
+  registerButton.disabled = !hasValidId;
+
+  registerLinkOutput.textContent = hasValidId
+    ? registrationLink(extensionId)
+    : "The registration link appears here after you paste a valid extension ID.";
 }
 
-function registrationCommand() {
-  const extensionId = sanitizeExtensionId(extensionIdInput.value) || "<paste-extension-id>";
-  const scriptPath = `${appRoot}\\scripts\\register-native-host.ps1`;
-  return `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${scriptPath}" -ExtensionId "${extensionId}" -Browser Both`;
+function registrationLink(extensionId) {
+  const browser = encodeURIComponent(browserSelect.value);
+  return `voice-watch://register-native-host?extensionId=${extensionId}&browser=${browser}`;
 }
 
 function sanitizeExtensionId(value) {

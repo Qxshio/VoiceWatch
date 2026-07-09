@@ -10,51 +10,101 @@ let nativeStatus = {
   appVersion: null,
   pollIntervalSeconds: 10
 };
+let lastVoiceStatus = null;
 let connectWaiters = [];
+let pollTimer = null;
+let pollInFlight = false;
+let intentionalDisconnect = false;
+let manuallyDisconnected = false;
+
+const statusHydration = chrome.storage.local
+  .get(["nativeStatus", "lastVoiceStatus", "manuallyDisconnected"])
+  .then((stored) => {
+    if (stored.nativeStatus) {
+      nativeStatus = { ...nativeStatus, ...stored.nativeStatus, connected: false, connecting: false };
+    }
+    if (stored.lastVoiceStatus) {
+      lastVoiceStatus = stored.lastVoiceStatus;
+    }
+    manuallyDisconnected = Boolean(stored.manuallyDisconnected);
+  });
 
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.storage.local.set({ nativeStatus });
+  ensureStatusHydrated().then(() => {
+    manuallyDisconnected = false;
+    persistStatus();
+    connectNative();
+  });
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  ensureStatusHydrated().then(() => {
+    manuallyDisconnected = false;
+    persistStatus();
+    connectNative();
+  });
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   handleRuntimeMessage(message)
     .then(sendResponse)
     .catch((error) => {
-      sendResponse({ ok: false, error: error.message || String(error) });
+      sendResponse({
+        ok: false,
+        error: error.message || String(error),
+        nativeStatus,
+        lastVoiceStatus
+      });
     });
   return true;
 });
 
 async function handleRuntimeMessage(message) {
+  await ensureStatusHydrated();
+
   switch (message?.type) {
-    case "connect_native":
-      return connectNative();
-    case "check_now": {
-      const connection = await connectNative();
-      if (!connection.ok) {
-        return connection;
-      }
-      const requestId = crypto.randomUUID();
-      const status = await fetchVoiceStatus(requestId);
-      postNative(status);
-      return { ok: true, status };
+    case "disconnect_native":
+      return disconnectNative();
+    case "get_status": {
+      const connection = manuallyDisconnected
+        ? { ok: false, nativeStatus }
+        : await connectNative();
+      return {
+        ok: connection.ok,
+        nativeStatus,
+        lastVoiceStatus
+      };
     }
-    case "get_status":
-      return { ok: true, nativeStatus };
     default:
-      return { ok: false, error: "Unknown message type." };
+      return {
+        ok: false,
+        error: "Unknown message type.",
+        nativeStatus,
+        lastVoiceStatus
+      };
   }
 }
 
+async function ensureStatusHydrated() {
+  await statusHydration;
+}
+
+function persistStatus() {
+  return chrome.storage.local.set({ nativeStatus, lastVoiceStatus, manuallyDisconnected });
+}
+
 function connectNative() {
+  if (manuallyDisconnected) {
+    return Promise.resolve({ ok: false, nativeStatus });
+  }
+
   if (nativePort) {
     if (nativeStatus.connected) {
+      startPolling(false);
       return Promise.resolve({ ok: true, nativeStatus });
     }
 
-    return new Promise((resolve) => {
-      connectWaiters.push(resolve);
-    });
+    return waitForConnection();
   }
 
   try {
@@ -66,13 +116,17 @@ function connectNative() {
       connected: false,
       lastError: error.message || String(error)
     };
-    chrome.storage.local.set({ nativeStatus });
+    persistStatus();
     return Promise.resolve({ ok: false, nativeStatus });
   }
 
   nativePort.onMessage.addListener(handleNativeMessage);
   nativePort.onDisconnect.addListener(() => {
-    const lastError = chrome.runtime.lastError?.message || "Native host disconnected.";
+    stopPolling();
+    const lastError = intentionalDisconnect
+      ? "Disconnected."
+      : chrome.runtime.lastError?.message || "Native host disconnected.";
+    intentionalDisconnect = false;
     nativeStatus = {
       ...nativeStatus,
       connecting: false,
@@ -80,7 +134,7 @@ function connectNative() {
       lastError
     };
     nativePort = null;
-    chrome.storage.local.set({ nativeStatus });
+    persistStatus();
     resolveConnectWaiters({ ok: false, nativeStatus });
   });
 
@@ -90,7 +144,7 @@ function connectNative() {
     connected: false,
     lastError: null
   };
-  chrome.storage.local.set({ nativeStatus });
+  persistStatus();
 
   try {
     nativePort.postMessage({
@@ -106,27 +160,66 @@ function connectNative() {
       lastError: error.message || String(error)
     };
     nativePort = null;
-    chrome.storage.local.set({ nativeStatus });
+    persistStatus();
     return Promise.resolve({ ok: false, nativeStatus });
   }
 
+  return waitForConnection();
+}
+
+function waitForConnection() {
   return new Promise((resolve) => {
     connectWaiters.push(resolve);
     setTimeout(() => {
       if (nativeStatus.connected) {
         resolve({ ok: true, nativeStatus });
-      } else {
-        nativeStatus = {
-          ...nativeStatus,
-          connecting: false,
-          connected: false,
-          lastError: nativeStatus.lastError || "Timed out waiting for the desktop app."
-        };
-        chrome.storage.local.set({ nativeStatus });
-        resolveConnectWaiters({ ok: false, nativeStatus });
+        return;
       }
+
+      nativeStatus = {
+        ...nativeStatus,
+        connecting: false,
+        connected: false,
+        lastError: nativeStatus.lastError || "Timed out waiting for the desktop app."
+      };
+      persistStatus();
+      resolveConnectWaiters({ ok: false, nativeStatus });
     }, 2500);
   });
+}
+
+function disconnectNative() {
+  stopPolling();
+
+  if (nativePort) {
+    intentionalDisconnect = true;
+    try {
+      nativePort.postMessage({ type: "disconnect" });
+    } catch (_error) {
+      // The port may already be closing. The local status is still updated below.
+    }
+
+    const port = nativePort;
+    nativePort = null;
+    setTimeout(() => {
+      try {
+        port.disconnect();
+      } catch (_error) {
+        // Ignore duplicate disconnects from the browser runtime.
+      }
+    }, 50);
+  }
+
+  manuallyDisconnected = true;
+  nativeStatus = {
+    ...nativeStatus,
+    connecting: false,
+    connected: false,
+    lastError: "Disconnected."
+  };
+  persistStatus();
+  resolveConnectWaiters({ ok: false, nativeStatus });
+  return Promise.resolve({ ok: true, nativeStatus, lastVoiceStatus });
 }
 
 function handleNativeMessage(message) {
@@ -138,25 +231,89 @@ function handleNativeMessage(message) {
       appVersion: message.appVersion,
       pollIntervalSeconds: message.pollIntervalSeconds ?? 10
     };
-    chrome.storage.local.set({ nativeStatus });
+    persistStatus();
     resolveConnectWaiters({ ok: true, nativeStatus });
+    startPolling(true);
     return;
   }
 
   if (message?.type === "check_voice_status") {
     fetchVoiceStatus(message.requestId)
+      .then(rememberVoiceStatus)
       .then(postNative)
       .catch((error) => {
-        postNative(errorEnvelope(message.requestId, "network_error", error.message));
+        const envelope = errorEnvelope(message.requestId, "network_error", error.message);
+        rememberVoiceStatus(envelope);
+        postNative(envelope);
       });
   }
 }
 
+function startPolling(immediate) {
+  stopPolling();
+  scheduleNextPoll(immediate ? 250 : pollIntervalMs());
+}
+
+function stopPolling() {
+  if (pollTimer) {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+  }
+}
+
+function scheduleNextPoll(delayMs = pollIntervalMs()) {
+  if (!nativeStatus.connected) {
+    return;
+  }
+
+  stopPolling();
+  pollTimer = setTimeout(pollVoiceStatus, delayMs);
+}
+
+async function pollVoiceStatus() {
+  if (!nativeStatus.connected || pollInFlight) {
+    scheduleNextPoll();
+    return;
+  }
+
+  pollInFlight = true;
+  try {
+    const envelope = await fetchVoiceStatus(newRequestId());
+    await rememberVoiceStatus(envelope);
+    postNative(envelope);
+  } finally {
+    pollInFlight = false;
+    scheduleNextPoll();
+  }
+}
+
+function pollIntervalMs() {
+  return Math.max(10, Number(nativeStatus.pollIntervalSeconds) || 10) * 1000;
+}
+
+async function rememberVoiceStatus(envelope) {
+  lastVoiceStatus = envelope;
+  await persistStatus();
+  return envelope;
+}
+
 function postNative(message) {
   if (!nativePort) {
-    connectNative();
+    return;
   }
-  nativePort.postMessage(message);
+
+  try {
+    nativePort.postMessage(message);
+  } catch (error) {
+    nativeStatus = {
+      ...nativeStatus,
+      connected: false,
+      connecting: false,
+      lastError: error.message || String(error)
+    };
+    stopPolling();
+    persistStatus();
+  }
 }
 
 function resolveConnectWaiters(result) {
@@ -288,4 +445,12 @@ function errorEnvelope(requestId, kind, message, checkedAt = Date.now(), retryAf
       retryAfterMs: retryAfter
     }
   };
+}
+
+function newRequestId() {
+  if (crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }

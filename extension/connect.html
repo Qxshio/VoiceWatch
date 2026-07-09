@@ -12,16 +12,33 @@
         <span class="mark" aria-hidden="true"></span>
         <div>
           <h1>Voice Watch</h1>
-          <p id="connection">Checking connection...</p>
+          <p id="connection">Checking desktop connection...</p>
         </div>
       </header>
 
-      <section class="actions" aria-label="Connection actions">
-        <button id="connect" type="button">Connect</button>
-        <button id="check" type="button">Check now</button>
+      <section class="status-grid" aria-label="Voice Watch status">
+        <article>
+          <span>Desktop</span>
+          <strong id="desktop-status">Checking</strong>
+          <small id="desktop-detail">Looking for Voice Watch.</small>
+        </article>
+        <article>
+          <span>Voice</span>
+          <strong id="voice-status">Unknown</strong>
+          <small id="voice-detail">Waiting for the first status check.</small>
+        </article>
+        <article>
+          <span>Last checked</span>
+          <strong id="last-checked">--</strong>
+          <small id="last-detail">The desktop app controls checks.</small>
+        </article>
       </section>
 
-      <pre id="result" aria-live="polite"></pre>
+      <section class="actions" aria-label="Connection actions">
+        <button id="disconnect" type="button" hidden>Disconnect</button>
+      </section>
+
+      <p id="result" aria-live="polite"></p>
     </main>
 
     <script src="connect.js"></script>

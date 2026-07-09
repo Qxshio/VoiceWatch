@@ -226,6 +226,9 @@ impl TrayApp {
             IpcEvent::ExtensionConnected { .. } => {
                 self.state.mark_connected();
             }
+            IpcEvent::ExtensionDisconnected { .. } => {
+                self.state.mark_disconnected();
+            }
             IpcEvent::VoiceStatus { envelope, .. } => {
                 self.state.apply_voice_status(envelope);
             }

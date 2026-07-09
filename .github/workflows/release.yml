@@ -32,6 +32,8 @@ jobs:
           cargo test
           node --check extension/service_worker.js
           node --check extension/connect.js
+          node --check extension/setup.js
+          node --check extension/help.js
           node -e "JSON.parse(require('fs').readFileSync('extension/manifest.json','utf8'))"
 
       - name: Build release executable

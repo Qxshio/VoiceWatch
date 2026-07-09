@@ -1,6 +1,6 @@
 param(
-    [ValidateSet("Chrome", "Edge", "Both")]
-    [string] $Browser = "Both",
+    [ValidateSet("Chrome", "Edge", "Brave", "Vivaldi", "Opera", "Chromium", "All", "Both")]
+    [string] $Browser = "All",
 
     [Parameter(Mandatory = $true)]
     [ValidatePattern("^[a-p]{32}$")]
@@ -51,12 +51,38 @@ function Register-BrowserHost {
     Set-Item -Path $RegistryPath -Value $manifestPath
 }
 
-if ($Browser -in @("Chrome", "Both")) {
-    Register-BrowserHost "HKCU:\Software\Google\Chrome\NativeMessagingHosts\$hostName"
+function Get-BrowserRegistryPaths {
+    param([string] $TargetBrowser)
+
+    $paths = [ordered]@{
+        Chrome = "HKCU:\Software\Google\Chrome\NativeMessagingHosts\$hostName"
+        Edge = "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\$hostName"
+        Brave = "HKCU:\Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\$hostName"
+        Vivaldi = "HKCU:\Software\Vivaldi\NativeMessagingHosts\$hostName"
+        Opera = "HKCU:\Software\Opera Software\Opera Stable\NativeMessagingHosts\$hostName"
+        Chromium = "HKCU:\Software\Chromium\NativeMessagingHosts\$hostName"
+    }
+
+    if ($TargetBrowser -eq "Both") {
+        return @($paths.Chrome, $paths.Edge)
+    }
+
+    if ($TargetBrowser -eq "All") {
+        return @(
+            $paths.Chrome,
+            $paths.Edge,
+            $paths.Brave,
+            $paths.Vivaldi,
+            $paths.Opera,
+            $paths.Chromium
+        )
+    }
+
+    return @($paths[$TargetBrowser])
 }
 
-if ($Browser -in @("Edge", "Both")) {
-    Register-BrowserHost "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\$hostName"
+foreach ($registryPath in (Get-BrowserRegistryPaths $Browser)) {
+    Register-BrowserHost $registryPath
 }
 
 Write-Host "Registered $hostName"

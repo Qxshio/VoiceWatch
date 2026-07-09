@@ -1,56 +1,131 @@
 const connection = document.querySelector("#connection");
 const result = document.querySelector("#result");
-const connectButton = document.querySelector("#connect");
-const checkButton = document.querySelector("#check");
+const desktopStatus = document.querySelector("#desktop-status");
+const desktopDetail = document.querySelector("#desktop-detail");
+const voiceStatus = document.querySelector("#voice-status");
+const voiceDetail = document.querySelector("#voice-detail");
+const lastChecked = document.querySelector("#last-checked");
+const lastDetail = document.querySelector("#last-detail");
+const disconnectButton = document.querySelector("#disconnect");
 
 const hasExtensionRuntime =
   typeof chrome !== "undefined" && chrome.runtime?.sendMessage;
 
 if (hasExtensionRuntime) {
-  connectButton.addEventListener("click", () => runAction("connect_native"));
-  checkButton.addEventListener("click", () => runAction("check_now"));
+  disconnectButton.addEventListener("click", disconnect);
   refreshStatus();
+  setInterval(refreshStatus, 2000);
 } else {
   connection.textContent = "Open from the browser extension";
-  result.textContent =
-    "This page only works after Voice Watch is loaded as a Chrome or Edge extension. Open setup.html from the bundled extension folder for install steps.";
-  connectButton.disabled = true;
-  checkButton.disabled = true;
+  desktopStatus.textContent = "Unavailable";
+  desktopDetail.textContent =
+    "Load the Voice Watch extension in your browser before opening this popup.";
+  voiceStatus.textContent = "Unknown";
+  voiceDetail.textContent = "This page cannot read extension status from a normal tab.";
+  lastChecked.textContent = "--";
+  lastDetail.textContent = "Open setup.html for install steps.";
 }
 
 async function refreshStatus() {
-  const response = await chrome.runtime.sendMessage({ type: "get_status" });
-  renderStatus(response?.nativeStatus);
+  try {
+    const response = await chrome.runtime.sendMessage({ type: "get_status" });
+    renderStatus(response);
+  } catch (error) {
+    connection.textContent = "Cannot reach extension service";
+    desktopStatus.textContent = "Error";
+    desktopDetail.textContent = error.message || String(error);
+    disconnectButton.hidden = true;
+  }
 }
 
-async function runAction(type) {
-  setBusy(true);
+async function disconnect() {
+  disconnectButton.disabled = true;
+  result.textContent = "Disconnecting...";
+
   try {
-    const response = await chrome.runtime.sendMessage({ type });
-    result.textContent = JSON.stringify(response, null, 2);
-    renderStatus(response?.nativeStatus);
+    const response = await chrome.runtime.sendMessage({ type: "disconnect_native" });
+    renderStatus(response);
+    result.textContent = "Disconnected.";
   } catch (error) {
     result.textContent = error.message || String(error);
   } finally {
-    setBusy(false);
+    disconnectButton.disabled = false;
   }
 }
 
-function renderStatus(status) {
-  if (!status) {
-    connection.textContent = "Not connected";
+function renderStatus(response) {
+  const nativeStatus = response?.nativeStatus;
+  const lastVoiceStatus = response?.lastVoiceStatus;
+
+  if (nativeStatus?.connected) {
+    connection.textContent = "Desktop connected";
+    desktopStatus.textContent = nativeStatus.appVersion
+      ? `Voice Watch ${nativeStatus.appVersion}`
+      : "Connected";
+    desktopDetail.textContent = `Checking about every ${nativeStatus.pollIntervalSeconds ?? 10} seconds.`;
+    disconnectButton.hidden = false;
+  } else if (nativeStatus?.connecting) {
+    connection.textContent = "Connecting to desktop app...";
+    desktopStatus.textContent = "Connecting";
+    desktopDetail.textContent = "Waiting for Voice Watch to reply.";
+    disconnectButton.hidden = true;
+  } else {
+    connection.textContent = "Desktop not connected";
+    desktopStatus.textContent = "Disconnected";
+    desktopDetail.textContent =
+      nativeStatus?.lastError || "Open Voice Watch from the tray to finish setup.";
+    disconnectButton.hidden = true;
+  }
+
+  renderVoiceStatus(lastVoiceStatus);
+}
+
+function renderVoiceStatus(envelope) {
+  if (!envelope) {
+    voiceStatus.textContent = "Unknown";
+    voiceDetail.textContent = "Waiting for the first status check.";
+    lastChecked.textContent = "--";
+    lastDetail.textContent = "No result yet.";
     return;
   }
 
-  if (status.connected) {
-    const version = status.appVersion ? `Desktop ${status.appVersion}` : "Desktop connected";
-    connection.textContent = version;
-  } else {
-    connection.textContent = status.lastError || "Not connected";
+  lastChecked.textContent = formatDateTime(envelope.checkedAt);
+  lastDetail.textContent = envelope.ok ? "Roblox replied." : "Check did not complete.";
+
+  if (!envelope.ok) {
+    voiceStatus.textContent = "Needs attention";
+    voiceDetail.textContent = envelope.error?.message || "Voice status check failed.";
+    return;
   }
+
+  const data = envelope.data || {};
+  if (data.isBanned) {
+    voiceStatus.textContent = "Banned";
+    voiceDetail.textContent = data.bannedUntilMs
+      ? `Suspension ends ${formatDateTime(data.bannedUntilMs)}.`
+      : "Suspension duration is unknown.";
+    return;
+  }
+
+  if (data.isVoiceEnabled && data.isUserOptIn && data.isUserEligible) {
+    voiceStatus.textContent = "Unbanned";
+    voiceDetail.textContent = "Voice chat appears available.";
+    return;
+  }
+
+  voiceStatus.textContent = "Unavailable";
+  voiceDetail.textContent = "Roblox says voice chat is not available for this session.";
 }
 
-function setBusy(isBusy) {
-  connectButton.disabled = isBusy;
-  checkButton.disabled = isBusy;
+function formatDateTime(value) {
+  if (!Number.isFinite(value)) {
+    return "--";
+  }
+
+  return new Date(value).toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  });
 }
