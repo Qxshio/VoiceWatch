@@ -18,6 +18,7 @@ pub struct Settings {
     pub show_overlay: bool,
     pub play_sound_on_restore: bool,
     pub overlay_position: OverlayPosition,
+    #[serde(default = "default_true")]
     pub launch_on_startup: bool,
 }
 
@@ -37,7 +38,7 @@ impl Default for Settings {
             show_overlay: true,
             play_sound_on_restore: true,
             overlay_position: OverlayPosition::TopRight,
-            launch_on_startup: false,
+            launch_on_startup: true,
         }
     }
 }

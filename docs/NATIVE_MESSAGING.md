@@ -56,7 +56,36 @@ Host to extension:
 }
 ```
 
-App request to extension:
+Before each Roblox web request, the extension asks the host whether polling is
+useful:
+
+```json
+{
+  "type": "poll_readiness_request",
+  "requestId": "uuid"
+}
+```
+
+Host readiness response:
+
+```json
+{
+  "type": "poll_readiness",
+  "requestId": "uuid",
+  "shouldPoll": false,
+  "robloxRunning": true,
+  "robloxPlaying": true,
+  "microphoneActive": true,
+  "reason": "microphone_active",
+  "message": "Roblox is using the microphone, so voice chat is active."
+}
+```
+
+If `shouldPoll` is false, the extension skips the Roblox web request for that
+interval. The host returns false when no visible Roblox game window exists, or
+when Windows reports Roblox is actively using the microphone.
+
+Legacy app request to extension:
 
 ```json
 {

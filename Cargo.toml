@@ -18,7 +18,7 @@ serde_json = "1.0"
 sysinfo = "0.30"
 tray-icon = "0.24"
 uuid = { version = "1.10", features = ["serde", "v4"] }
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
 winreg = "0.52"
 winit = "0.30"
 

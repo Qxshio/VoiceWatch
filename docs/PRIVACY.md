@@ -65,3 +65,13 @@ Best-effort last-server detection reads local Roblox log files under:
 This is used only to detect `placeId` and `gameInstanceId` when available. The
 app does not read Roblox memory, inject into Roblox, or manipulate the Roblox
 process.
+
+## Microphone activity
+
+Voice Watch does not record, inspect, transmit, or analyze microphone audio.
+
+On Windows, the desktop app reads local microphone-use metadata from the current
+user's privacy registry entries for the running Roblox executable. This only
+answers whether Windows currently considers Roblox to be using the microphone.
+Voice Watch uses that signal to pause Roblox web checks while VC is already
+active.

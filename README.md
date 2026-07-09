@@ -5,6 +5,44 @@ voice chat suspension timers and notifies you when VC is restored.
 
 This project is not affiliated with Roblox.
 
+## The problem Voice Watch solves
+
+Roblox voice chat suspensions can leave you guessing. The Roblox client may keep
+running after you leave a game, the suspension timer is not surfaced as a
+desktop notification, and repeatedly checking the voice endpoint while VC is
+already working is unnecessary.
+
+Voice Watch exists to answer one practical question:
+
+> "When can I use Roblox voice chat again?"
+
+It runs quietly in the Windows tray, tracks the sanitized VC status returned by
+Roblox, shows a local countdown when Roblox reports a temporary suspension, and
+notifies you when VC is confirmed restored.
+
+## What Voice Watch does
+
+Voice Watch combines a local desktop app with a small browser connector:
+
+1. The browser connector uses your existing Roblox browser login session to ask
+   Roblox for voice settings.
+2. The connector strips the response down to safe status fields and sends those
+   fields to the local desktop app.
+3. The desktop app renders the tray status, countdown, and restore notification.
+4. Before each web check, the connector asks the desktop app whether polling
+   makes sense.
+5. The desktop app only allows normal polling while a real Roblox game window is
+   visible.
+6. If Windows reports that Roblox is actively using the microphone, Voice Watch
+   pauses web checks because VC is already active.
+7. If Roblox reports a temporary suspension with an end time, Voice Watch waits
+   until that countdown expires before checking again.
+
+This keeps checks focused on the moments where they are useful: while you are in
+a Roblox game, not already using VC, and waiting for a suspension to clear. A
+small HUD attaches near the top of the Roblox window while suspended so you can
+see the remaining time without opening the tray menu.
+
 ## Privacy model
 
 Voice Watch is designed around a hard boundary: the desktop app never needs
@@ -30,27 +68,32 @@ The extension sends only these fields:
 
 See [docs/PRIVACY.md](docs/PRIVACY.md) for the full model.
 
-## Current prototype status
+## Current status
 
-The first prototype includes:
+Voice Watch currently includes:
 
 - Rust desktop project structure with clean slices for state, settings, tray,
-  native messaging, process detection, countdown logic, Roblox log parsing, and
-  rejoin behavior.
-- Native messaging host mode with Chromium browser framing and `hello` /
-  `hello_ack` support.
+  native messaging, process detection, microphone activity detection, countdown
+  logic, Roblox log parsing, and rejoin behavior.
+- Native messaging host mode with Chromium browser framing.
 - Manifest V3 browser extension that connects to the native host automatically.
 - Real extension fetch to `https://voice.roblox.com/v1/settings` using
   `credentials: "include"` and no cookie permission.
 - Sanitized voice status conversion, including `bannedUntilMs`.
 - Local countdown anchoring that is resilient to system clock changes after the
   status fetch.
-- A basic tray menu and a native dialog notification fallback for the restore
-  overlay.
+- Poll pause behavior while Roblox is using the microphone.
+- Poll pause behavior while a known suspension countdown is still active.
+- Visible Roblox game-window detection so the lingering background client does
+  not keep checks running after you leave a game.
+- Compact suspension HUD attached to the Roblox window, with a Rejoin button
+  after VC is confirmed restored.
+- A tray menu and native dialog notification fallback for restore alerts.
+- Startup launch enabled by default from the installer.
 - Development scripts for registering and unregistering the native messaging
   host.
 
-The polished Medal-style overlay and settings UI are planned follow-up work.
+The polished settings UI is planned follow-up work.
 
 ## Requirements
 
@@ -108,7 +151,7 @@ Default settings:
   "showOverlay": true,
   "playSoundOnRestore": true,
   "overlayPosition": "top-right",
-  "launchOnStartup": false
+  "launchOnStartup": true
 }
 ```
 
@@ -117,13 +160,17 @@ When `onlyPollWhenRobloxRunning` is enabled, Voice Watch waits for a visible
 Roblox game window instead of trusting the lingering background client process.
 When `pausePollingWhileRobloxUsesMicrophone` is enabled, Voice Watch pauses
 Roblox web checks while Windows reports that Roblox is actively using the
-microphone.
+microphone. Voice Watch does not read microphone audio; it only reads Windows'
+local microphone-use metadata for the Roblox executable.
+When Roblox returns a temporary suspension end time, the browser connector waits
+for that local countdown to expire before asking Roblox again.
 
 ## Load the extension in a Chromium-based browser
 
 For regular use, install Voice Watch, open the tray menu, and choose
 **Connect Roblox**. Voice Watch opens the bundled setup page only when the
-browser connector still needs to be loaded.
+browser connector still needs to be loaded. When Voice Watch starts and the
+browser connector is not connected yet, the setup page opens automatically.
 
 For development:
 
@@ -190,8 +237,8 @@ src/
   messages.rs          Shared sanitized protocol models
   monitor.rs           Polling decisions and backoff
   native_messaging.rs  Chromium native messaging framing
-  overlay.rs           Restore notification adapter
-  process.rs           Roblox process detection
+  overlay.rs           Compact suspension HUD and restore notification adapter
+  process.rs           Roblox window and microphone activity detection
   rejoin.rs            Last-server rejoin targets
   roblox_logs.rs       Best-effort Roblox log parsing
   settings.rs          Local settings load/save/validation

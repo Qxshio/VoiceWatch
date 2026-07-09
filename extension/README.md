@@ -9,6 +9,23 @@ It does not request the `cookies` permission, does not read browser cookie
 storage, and does not send `.ROBLOSECURITY` or any other token to the desktop
 app.
 
+## How polling works
+
+The extension does not blindly call Roblox forever. Before each voice-status
+request, it asks the desktop app whether a check is useful.
+
+The desktop app tells it to skip the request when:
+
+- no visible Roblox game window is open,
+- Roblox is already using the microphone.
+
+The extension also sleeps locally while a known suspension countdown from the
+last Roblox response has not expired yet.
+
+When a check is allowed, the extension calls
+`https://voice.roblox.com/v1/settings` with `credentials: "include"` and sends
+only sanitized status fields back to the local app.
+
 ## Development loading
 
 1. Open `setup.html`.

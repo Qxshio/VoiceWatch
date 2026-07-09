@@ -60,13 +60,26 @@ const browser = help[params.get("browser")] || help.chromium;
 
 document.querySelector("#title").textContent = `${browser.name} setup help`;
 document.querySelector("#summary").textContent = `Extensions page: ${browser.url}`;
+const extensionsLink = document.querySelector("#extensions-link");
+extensionsLink.href = browser.url;
+extensionsLink.textContent = `Open ${browser.url}`;
 
 const steps = document.querySelector("#steps");
-for (const step of browser.steps) {
+browser.steps.forEach((step, index) => {
   const item = document.createElement("li");
-  item.textContent = step;
+  if (index === 0) {
+    item.append("Open ");
+    const link = document.createElement("a");
+    link.href = browser.url;
+    link.target = "_blank";
+    link.rel = "noreferrer";
+    link.textContent = browser.url;
+    item.append(link, ` in ${browser.name}.`);
+  } else {
+    item.textContent = step;
+  }
   steps.appendChild(item);
-}
+});
 
 document.querySelector("#back").addEventListener("click", () => {
   window.location.href = "setup.html";

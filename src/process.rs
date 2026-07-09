@@ -2,9 +2,9 @@ use std::collections::HashSet;
 use std::path::Path;
 use sysinfo::{ProcessRefreshKind, RefreshKind, System};
 use windows_sys::core::BOOL;
-use windows_sys::Win32::Foundation::{HWND, LPARAM};
+use windows_sys::Win32::Foundation::{HWND, LPARAM, RECT};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetWindowTextLengthW, GetWindowThreadProcessId, IsWindowVisible,
+    EnumWindows, GetWindowRect, GetWindowTextLengthW, GetWindowThreadProcessId, IsWindowVisible,
 };
 use winreg::enums::HKEY_CURRENT_USER;
 use winreg::RegKey;
@@ -20,6 +20,24 @@ pub struct RobloxPresence {
     pub process_running: bool,
     pub game_window_visible: bool,
     pub microphone_active: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WindowBounds {
+    pub left: i32,
+    pub top: i32,
+    pub right: i32,
+    pub bottom: i32,
+}
+
+impl WindowBounds {
+    pub fn width(self) -> i32 {
+        self.right.saturating_sub(self.left)
+    }
+
+    pub fn height(self) -> i32 {
+        self.bottom.saturating_sub(self.top)
+    }
 }
 
 pub fn roblox_presence() -> RobloxPresence {
@@ -44,6 +62,16 @@ pub fn is_roblox_running() -> bool {
     roblox_presence().game_window_visible
 }
 
+pub fn roblox_window_bounds() -> Option<WindowBounds> {
+    let processes = roblox_player_processes();
+    let process_ids = processes
+        .iter()
+        .map(|process| process.pid)
+        .collect::<HashSet<_>>();
+    let hwnd = find_visible_window_for_processes(&process_ids)?;
+    window_bounds(hwnd)
+}
+
 struct RobloxProcess {
     pid: u32,
     microphone_registry_key: Option<String>,
@@ -66,13 +94,17 @@ fn roblox_player_processes() -> Vec<RobloxProcess> {
 }
 
 fn has_visible_window_for_processes(process_ids: &HashSet<u32>) -> bool {
+    find_visible_window_for_processes(process_ids).is_some()
+}
+
+fn find_visible_window_for_processes(process_ids: &HashSet<u32>) -> Option<HWND> {
     if process_ids.is_empty() {
-        return false;
+        return None;
     }
 
     let mut search = WindowSearch {
         process_ids,
-        found: false,
+        hwnd: std::ptr::null_mut(),
     };
 
     unsafe {
@@ -82,12 +114,12 @@ fn has_visible_window_for_processes(process_ids: &HashSet<u32>) -> bool {
         );
     }
 
-    search.found
+    (!search.hwnd.is_null()).then_some(search.hwnd)
 }
 
 struct WindowSearch<'a> {
     process_ids: &'a HashSet<u32>,
-    found: bool,
+    hwnd: HWND,
 }
 
 unsafe extern "system" fn enum_visible_process_window(hwnd: HWND, lparam: LPARAM) -> BOOL {
@@ -107,8 +139,19 @@ unsafe extern "system" fn enum_visible_process_window(hwnd: HWND, lparam: LPARAM
         return 1;
     }
 
-    search.found = true;
+    search.hwnd = hwnd;
     0
+}
+
+fn window_bounds(hwnd: HWND) -> Option<WindowBounds> {
+    let mut rect = RECT::default();
+    let ok = unsafe { GetWindowRect(hwnd, &mut rect) };
+    (ok != 0).then_some(WindowBounds {
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+    })
 }
 
 fn is_roblox_microphone_active(current_microphone_keys: &HashSet<&str>) -> bool {

@@ -5,6 +5,7 @@ use crate::ipc::{self, IpcEvent};
 use crate::messages::VoiceStatusData;
 use crate::overlay;
 use crate::process;
+use crate::rejoin;
 use crate::roblox_logs;
 use crate::settings;
 use anyhow::{Context, Result};
@@ -115,6 +116,9 @@ pub fn run_simulated_countdown(seconds: u64) -> Result<()> {
 
 struct TrayApp {
     state: AppState,
+    hud: overlay::SuspensionHud,
+    last_server: Option<rejoin::LastServer>,
+    setup_opened_on_startup: bool,
     tray_icon: Option<TrayIcon>,
     status_item: Option<MenuItem>,
     countdown_item: Option<MenuItem>,
@@ -126,6 +130,9 @@ impl TrayApp {
     fn new(_settings: settings::Settings) -> Self {
         Self {
             state: AppState::default(),
+            hud: overlay::SuspensionHud::default(),
+            last_server: None,
+            setup_opened_on_startup: false,
             tray_icon: None,
             status_item: None,
             countdown_item: None,
@@ -148,6 +155,7 @@ impl TrayApp {
         self.menu_shape = Some(shape);
 
         self.refresh_menu_labels();
+        self.refresh_hud();
         Ok(())
     }
 
@@ -215,6 +223,7 @@ impl TrayApp {
         }
 
         self.refresh_menu_labels();
+        self.refresh_hud();
     }
 
     fn refresh_menu_labels(&self) {
@@ -277,9 +286,56 @@ impl TrayApp {
             }
             IpcEvent::VoiceStatus { envelope, .. } => {
                 self.state.apply_voice_status(envelope);
+                if matches!(self.state.voice_state, VoiceState::Restored { .. }) {
+                    self.last_server = roblox_logs::detect_last_server_from_logs();
+                    self.state.restored_overlay_shown = true;
+                }
             }
         }
         self.refresh_tray();
+    }
+
+    fn handle_tick(&mut self) {
+        if matches!(self.state.voice_state, VoiceState::TempSuspended { .. })
+            && self
+                .state
+                .countdown
+                .as_ref()
+                .is_some_and(|countdown| countdown.is_expired())
+        {
+            self.state.mark_expired_checking();
+        }
+
+        if !self.setup_opened_on_startup && !self.state.is_browser_connected() {
+            self.setup_opened_on_startup = true;
+            let _ = open_setup_page(false);
+        }
+
+        self.refresh_tray();
+    }
+
+    fn refresh_hud(&mut self) {
+        match &self.state.voice_state {
+            VoiceState::TempSuspended { .. } => {
+                let remaining = self
+                    .state
+                    .countdown
+                    .as_ref()
+                    .map(|countdown| format_remaining(countdown.remaining()))
+                    .unwrap_or_else(|| "--".into());
+                self.hud.show_suspended(remaining);
+            }
+            VoiceState::SuspendedUnknownDuration { .. } => {
+                self.hud.show_suspended("unknown".into());
+            }
+            VoiceState::ExpiredChecking => {
+                self.hud.show_suspended("confirming".into());
+            }
+            VoiceState::Restored { .. } => {
+                self.hud.show_restored(self.last_server.clone());
+            }
+            _ => self.hud.hide(),
+        }
     }
 }
 
@@ -296,7 +352,7 @@ impl ApplicationHandler<UserEvent> for TrayApp {
         match event {
             UserEvent::Menu(menu_event) => self.handle_menu(event_loop, menu_event),
             UserEvent::Ipc(ipc_event) => self.handle_ipc(ipc_event),
-            UserEvent::Tick => self.refresh_tray(),
+            UserEvent::Tick => self.handle_tick(),
         }
     }
 

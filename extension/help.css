@@ -53,6 +53,16 @@ p {
   line-height: 1.55;
 }
 
+a {
+  color: #75dfa8;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
 section {
   margin-top: 12px;
   padding: 16px;

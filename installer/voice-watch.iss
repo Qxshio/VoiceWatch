@@ -58,6 +58,7 @@ Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: no
 Root: HKCU; Subkey: "Software\Classes\voice-watch"; ValueType: string; ValueData: "URL:Voice Watch"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Classes\voice-watch"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
 Root: HKCU; Subkey: "Software\Classes\voice-watch\shell\open\command"; ValueType: string; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "{#MyAppName}"; ValueData: """{app}\{#MyAppExeName}"""; Flags: uninsdeletevalue
 
 #if ExtensionId != ""
 [UninstallRun]

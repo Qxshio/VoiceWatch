@@ -10,7 +10,6 @@ const pathOutput = document.querySelector("#path");
 const registerLinkOutput = document.querySelector("#register-link");
 const extensionIdInput = document.querySelector("#extension-id");
 const idStatus = document.querySelector("#id-status");
-const openBrowserButton = document.querySelector("#open-browser");
 const browserHelpButton = document.querySelector("#browser-help");
 const openFolderButton = document.querySelector("#open-folder");
 const copyPathButton = document.querySelector("#copy-path");
@@ -38,16 +37,6 @@ initialize();
 
 browserSelect.addEventListener("change", renderRegistration);
 extensionIdInput.addEventListener("input", renderRegistration);
-
-openBrowserButton.addEventListener("click", () => {
-  const browser = selectedBrowser();
-  if (!browser) {
-    return;
-  }
-
-  browserStatus.textContent = `Opening ${browsers[browser].label}.`;
-  window.location.href = `voice-watch://open-extensions?browser=${encodeURIComponent(browser)}`;
-});
 
 browserHelpButton.addEventListener("click", () => {
   const browser = selectedBrowser();
@@ -191,7 +180,6 @@ function showUnsupportedBrowser() {
   successPage.hidden = true;
   unsupportedPage.hidden = false;
   browserField.hidden = true;
-  openBrowserButton.disabled = true;
   browserHelpButton.disabled = true;
   registerButton.disabled = true;
 }

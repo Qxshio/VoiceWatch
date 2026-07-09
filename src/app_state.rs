@@ -189,7 +189,12 @@ impl AppState {
 
         self.countdown = None;
         if data.is_voice_enabled && data.is_user_opt_in && data.is_user_eligible {
-            self.voice_state = if matches!(self.voice_state, VoiceState::ExpiredChecking) {
+            self.voice_state = if matches!(
+                self.voice_state,
+                VoiceState::ExpiredChecking
+                    | VoiceState::TempSuspended { .. }
+                    | VoiceState::SuspendedUnknownDuration { .. }
+            ) {
                 VoiceState::Restored { checked_at_ms }
             } else {
                 VoiceState::VoiceOk { checked_at_ms }

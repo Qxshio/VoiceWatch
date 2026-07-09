@@ -294,7 +294,7 @@ function scheduleNextPoll(delayMs = pollIntervalMs()) {
   }
 
   stopPolling();
-  pollTimer = setTimeout(pollVoiceStatus, delayMs);
+  pollTimer = setTimeout(pollVoiceStatus, nextPollDelayMs(delayMs));
 }
 
 async function pollVoiceStatus() {
@@ -394,6 +394,25 @@ function resolvePollReadinessWaiters(message) {
 
 function pollIntervalMs() {
   return Math.max(10, Number(nativeStatus.pollIntervalSeconds) || 10) * 1000;
+}
+
+function nextPollDelayMs(requestedDelayMs) {
+  const suspensionDelay = suspensionPauseDelayMs();
+  return suspensionDelay === null ? requestedDelayMs : suspensionDelay;
+}
+
+function suspensionPauseDelayMs() {
+  const data = lastVoiceStatus?.ok ? lastVoiceStatus.data : null;
+  if (!data?.isBanned || !Number.isFinite(data.bannedUntilMs)) {
+    return null;
+  }
+
+  const remainingMs = data.bannedUntilMs - Date.now();
+  if (remainingMs <= 0) {
+    return null;
+  }
+
+  return Math.max(1000, remainingMs + 1000);
 }
 
 async function rememberVoiceStatus(envelope) {
