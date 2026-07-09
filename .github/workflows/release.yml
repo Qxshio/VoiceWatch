@@ -44,10 +44,33 @@ jobs:
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
 
+      - name: Locate Inno Setup
+        id: inno
+        shell: pwsh
+        run: |
+          $iscc = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+          if (-not $iscc) {
+            $roots = @(
+              "${env:ProgramFiles(x86)}",
+              "$env:ProgramFiles",
+              "$env:ChocolateyInstall",
+              "$env:ProgramData\chocolatey"
+            ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_) }
+            $iscc = $roots |
+              ForEach-Object { Get-ChildItem -Path $_ -Filter ISCC.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 } |
+              Select-Object -First 1
+          }
+          if (-not $iscc) {
+            throw "Inno Setup Compiler was not found after Chocolatey install."
+          }
+          $isccPath = if ($iscc.Source) { $iscc.Source } else { $iscc.FullName }
+          "iscc_path=$isccPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Using Inno Setup compiler at $isccPath"
+
       - name: Build installer
         shell: pwsh
         run: |
-          $args = @("-SkipRustBuild")
+          $args = @("-SkipRustBuild", "-IsccPath", "${{ steps.inno.outputs.iscc_path }}")
           if ("${{ vars.VOICE_WATCH_EXTENSION_ID }}") {
             $args += @("-ExtensionId", "${{ vars.VOICE_WATCH_EXTENSION_ID }}")
           }

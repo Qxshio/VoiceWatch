@@ -47,11 +47,27 @@ New-Item -ItemType Directory -Force -Path $distDir | Out-Null
 Copy-Item -LiteralPath $releaseExe -Destination (Join-Path $distDir "voice-watch-windows-x64.exe") -Force
 
 if ([string]::IsNullOrWhiteSpace($IsccPath)) {
+    $isccCommand = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+    if ($isccCommand) {
+        $IsccPath = $isccCommand.Source
+    }
+}
+
+if ([string]::IsNullOrWhiteSpace($IsccPath)) {
+    $programFilesX86 = [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFilesX86)
+    $programFiles = [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)
     $candidates = @(
-        "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
-        "C:\Program Files\Inno Setup 6\ISCC.exe",
-        "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
-    )
+        (Join-Path $programFilesX86 "Inno Setup 6\ISCC.exe"),
+        (Join-Path $programFiles "Inno Setup 6\ISCC.exe"),
+        (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe"),
+        (Join-Path $env:ProgramData "chocolatey\bin\ISCC.exe")
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+    if (-not [string]::IsNullOrWhiteSpace($env:ChocolateyInstall)) {
+        $candidates += (Join-Path $env:ChocolateyInstall "bin\ISCC.exe")
+        $candidates += (Join-Path $env:ChocolateyInstall "lib\innosetup\tools\ISCC.exe")
+    }
+
     $IsccPath = $candidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 }
 
