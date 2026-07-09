@@ -2,6 +2,8 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use winreg::enums::HKEY_CURRENT_USER;
+use winreg::RegKey;
 
 const APP_DIR_NAME: &str = "Voice Watch";
 const SETTINGS_FILE_NAME: &str = "settings.json";
@@ -11,36 +13,34 @@ const MAX_POLL_SECONDS: u64 = 300;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
+    #[serde(default = "default_poll_interval_seconds")]
     pub poll_interval_seconds: u64,
+    #[serde(default = "default_true")]
     pub only_poll_when_roblox_running: bool,
     #[serde(default)]
     pub developer_mode: bool,
     #[serde(default = "default_true")]
     pub pause_polling_while_roblox_uses_microphone: bool,
+    #[serde(default = "default_true")]
+    pub smart_polling: bool,
+    #[serde(default = "default_true")]
     pub show_overlay: bool,
+    #[serde(default = "default_true")]
     pub play_sound_on_restore: bool,
-    pub overlay_position: OverlayPosition,
     #[serde(default = "default_true")]
     pub launch_on_startup: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum OverlayPosition {
-    TopRight,
-    BottomRight,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            poll_interval_seconds: 10,
+            poll_interval_seconds: default_poll_interval_seconds(),
             only_poll_when_roblox_running: true,
             developer_mode: false,
             pause_polling_while_roblox_uses_microphone: true,
+            smart_polling: true,
             show_overlay: true,
             play_sound_on_restore: true,
-            overlay_position: OverlayPosition::TopRight,
             launch_on_startup: true,
         }
     }
@@ -99,6 +99,36 @@ pub fn settings_path() -> Result<PathBuf> {
     Ok(base.join(APP_DIR_NAME).join(SETTINGS_FILE_NAME))
 }
 
+pub fn apply_launch_on_startup(enabled: bool) -> Result<()> {
+    const RUN_SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
+    const RUN_VALUE_NAME: &str = "Voice Watch";
+
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let (run_key, _) = hkcu
+        .create_subkey(RUN_SUBKEY)
+        .context("failed to open Windows startup registry key")?;
+
+    if enabled {
+        let exe_path =
+            std::env::current_exe().context("failed to locate Voice Watch executable")?;
+        run_key
+            .set_value(RUN_VALUE_NAME, &format!("\"{}\"", exe_path.display()))
+            .context("failed to enable Voice Watch startup")?;
+    } else {
+        match run_key.delete_value(RUN_VALUE_NAME) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error).context("failed to disable Voice Watch startup"),
+        }
+    }
+
+    Ok(())
+}
+
+fn default_poll_interval_seconds() -> u64 {
+    10
+}
+
 fn default_true() -> bool {
     true
 }
@@ -108,13 +138,15 @@ fn settings_needs_default_fields(value: &serde_json::Value) -> bool {
         return false;
     };
 
-    [
-        "developerMode",
-        "pausePollingWhileRobloxUsesMicrophone",
-        "launchOnStartup",
-    ]
-    .iter()
-    .any(|key| !object.contains_key(*key))
+    object.contains_key("overlayPosition")
+        || [
+            "developerMode",
+            "pausePollingWhileRobloxUsesMicrophone",
+            "smartPolling",
+            "launchOnStartup",
+        ]
+        .iter()
+        .any(|key| !object.contains_key(*key))
 }
 
 #[cfg(test)]
@@ -129,7 +161,6 @@ mod tests {
             "onlyPollWhenRobloxRunning": true,
             "showOverlay": true,
             "playSoundOnRestore": true,
-            "overlayPosition": "top-right"
         });
 
         assert!(settings_needs_default_fields(&old_settings));
@@ -140,5 +171,13 @@ mod tests {
         let settings = serde_json::to_value(Settings::default()).unwrap();
 
         assert!(!settings_needs_default_fields(&settings));
+    }
+
+    #[test]
+    fn stale_overlay_position_triggers_rewrite() {
+        let mut settings = serde_json::to_value(Settings::default()).unwrap();
+        settings["overlayPosition"] = json!("top-right");
+
+        assert!(settings_needs_default_fields(&settings));
     }
 }

@@ -1,6 +1,7 @@
 use crate::process;
 use crate::rejoin::{open_rejoin_target, LastServer};
 use anyhow::Result;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, Once, OnceLock};
 use std::time::{Duration, Instant};
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
@@ -31,6 +32,7 @@ pub enum OverlayAction {
 enum HudMode {
     Suspended { remaining: String },
     Restored,
+    Rejoining { started_at: Instant },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,11 +73,13 @@ const HUD_CLASS_NAME: &str = "VoiceWatchSuspensionHud";
 const SUSPENDED_WIDTH: i32 = 328;
 const RESTORED_WIDTH: i32 = 420;
 const HUD_HEIGHT: i32 = 42;
-const HUD_TOP_OFFSET: i32 = 12;
+const HUD_TOP_OFFSET: i32 = 56;
 const RESTORE_ANIMATION_MS: u64 = 850;
+const REJOINING_DISPLAY_MS: u64 = 12_000;
 
 static REGISTER_HUD_CLASS: Once = Once::new();
 static HUD_SHARED: OnceLock<Mutex<HudState>> = OnceLock::new();
+static IGNORE_NEXT_POSITION_CHANGE: AtomicBool = AtomicBool::new(false);
 
 pub fn play_restore_sound() {
     unsafe {
@@ -138,24 +142,61 @@ impl SuspensionHud {
     }
 
     pub fn show_restored(&mut self, last_server: Option<LastServer>) {
-        let (should_animate, hidden) = {
+        enum RestoredHudUpdate {
+            Rejoining { hidden: bool },
+            Restored { should_animate: bool, hidden: bool },
+        }
+
+        let update = {
             let mut state = hud_shared().lock().expect("HUD state mutex poisoned");
-            let should_animate = !matches!(state.mode, HudMode::Restored);
-            if should_animate {
-                state.hidden = false;
-            }
-            state.mode = HudMode::Restored;
             state.last_server = last_server;
-            if should_animate || state.restored_started_at.is_none() {
-                state.restored_started_at = Some(Instant::now());
+
+            if let HudMode::Rejoining { started_at } = &state.mode {
+                if started_at.elapsed() < Duration::from_millis(REJOINING_DISPLAY_MS) {
+                    RestoredHudUpdate::Rejoining {
+                        hidden: state.hidden,
+                    }
+                } else {
+                    state.hidden = true;
+                    state.mode = HudMode::Restored;
+                    RestoredHudUpdate::Rejoining { hidden: true }
+                }
+            } else {
+                let should_animate = !matches!(state.mode, HudMode::Restored);
+                if should_animate {
+                    state.hidden = false;
+                }
+                state.mode = HudMode::Restored;
+                if should_animate || state.restored_started_at.is_none() {
+                    state.restored_started_at = Some(Instant::now());
+                }
+                RestoredHudUpdate::Restored {
+                    should_animate,
+                    hidden: state.hidden,
+                }
             }
-            (should_animate, state.hidden)
         };
 
-        if hidden {
-            self.hide();
-            return;
-        }
+        let should_animate = match update {
+            RestoredHudUpdate::Rejoining { hidden } => {
+                if hidden {
+                    self.hide();
+                } else {
+                    self.present_current_state();
+                }
+                return;
+            }
+            RestoredHudUpdate::Restored {
+                should_animate,
+                hidden,
+            } => {
+                if hidden {
+                    self.hide();
+                    return;
+                }
+                should_animate
+            }
+        };
 
         let hwnd = self.present_current_state();
         if should_animate {
@@ -204,6 +245,7 @@ impl SuspensionHud {
         let y = default_y.saturating_add(offset_y);
 
         unsafe {
+            IGNORE_NEXT_POSITION_CHANGE.store(true, Ordering::SeqCst);
             SetWindowPos(
                 hwnd,
                 HWND_TOPMOST,
@@ -230,6 +272,7 @@ impl SuspensionHud {
         let size = hud_size();
 
         self.hwnd = unsafe {
+            IGNORE_NEXT_POSITION_CHANGE.store(true, Ordering::SeqCst);
             CreateWindowExW(
                 WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED,
                 class_name.as_ptr(),
@@ -249,7 +292,6 @@ impl SuspensionHud {
         if !self.hwnd.is_null() {
             unsafe {
                 SetLayeredWindowAttributes(self.hwnd, 0, 244, LWA_ALPHA);
-                ShowWindow(self.hwnd, SW_SHOWNA);
             }
         }
 
@@ -306,7 +348,9 @@ unsafe extern "system" fn hud_window_proc(
             DefWindowProcW(hwnd, message, wparam, lparam)
         }
         WM_WINDOWPOSCHANGED => {
-            remember_manual_offset(hwnd);
+            if !IGNORE_NEXT_POSITION_CHANGE.swap(false, Ordering::SeqCst) {
+                remember_manual_offset(hwnd);
+            }
             DefWindowProcW(hwnd, message, wparam, lparam)
         }
         WM_LBUTTONUP => {
@@ -325,16 +369,24 @@ unsafe extern "system" fn hud_window_proc(
                     ShowWindow(hwnd, SW_HIDE);
                 }
                 Some(HudButton::Rejoin) => {
-                    let server = hud_shared()
-                        .lock()
-                        .expect("HUD state mutex poisoned")
-                        .last_server
-                        .clone();
+                    let server = {
+                        let mut state = hud_shared().lock().expect("HUD state mutex poisoned");
+                        let server = state.last_server.clone();
+                        if server.is_some() {
+                            state.mode = HudMode::Rejoining {
+                                started_at: Instant::now(),
+                            };
+                            state.hidden = false;
+                            state.restored_started_at = None;
+                        }
+                        server
+                    };
+                    ShowWindow(hwnd, SW_SHOWNA);
+                    InvalidateRect(hwnd, std::ptr::null(), 1);
                     let Some(server) = server else {
                         return 0;
                     };
                     let _ = open_rejoin_target(&server);
-                    ShowWindow(hwnd, SW_HIDE);
                 }
                 None => {}
             }
@@ -351,7 +403,7 @@ fn hud_shared() -> &'static Mutex<HudState> {
 fn hud_size() -> (i32, i32) {
     match &hud_shared().lock().expect("HUD state mutex poisoned").mode {
         HudMode::Suspended { .. } => (SUSPENDED_WIDTH, HUD_HEIGHT),
-        HudMode::Restored => (RESTORED_WIDTH, HUD_HEIGHT),
+        HudMode::Restored | HudMode::Rejoining { .. } => (RESTORED_WIDTH, HUD_HEIGHT),
     }
 }
 
@@ -405,6 +457,7 @@ fn paint_hud(hwnd: HWND) {
         match state.mode {
             HudMode::Suspended { remaining } => paint_suspended(hdc, remaining),
             HudMode::Restored => paint_restored(hdc, state.last_server.as_ref(), restore_progress),
+            HudMode::Rejoining { .. } => paint_rejoining(hdc),
         }
 
         EndPaint(hwnd, &paint);
@@ -544,6 +597,23 @@ fn paint_restored(
     }
 }
 
+fn paint_rejoining(hdc: windows_sys::Win32::Graphics::Gdi::HDC) {
+    paint_drag_handle(hdc);
+
+    draw_text(
+        hdc,
+        "Rejoining..",
+        RECT {
+            left: 32,
+            top: 0,
+            right: RESTORED_WIDTH - 20,
+            bottom: HUD_HEIGHT,
+        },
+        rgb(232, 235, 239),
+        DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
+    );
+}
+
 fn paint_drag_handle(hdc: windows_sys::Win32::Graphics::Gdi::HDC) {
     let rect = drag_handle_rect();
     unsafe {
@@ -615,7 +685,7 @@ fn paint_button(
 }
 
 fn button_at_point(state: &HudState, x: i32, y: i32) -> Option<HudButton> {
-    if point_in_rect(x, y, hide_button_rect(&state.mode)) {
+    if hide_button_rect(&state.mode).is_some_and(|rect| point_in_rect(x, y, rect)) {
         return Some(HudButton::Hide);
     }
 
@@ -641,10 +711,11 @@ fn drag_handle_rect() -> RECT {
     }
 }
 
-fn hide_button_rect(mode: &HudMode) -> RECT {
+fn hide_button_rect(mode: &HudMode) -> Option<RECT> {
     match mode {
-        HudMode::Suspended { .. } => suspended_hide_button_rect(),
-        HudMode::Restored => restored_hide_button_rect(),
+        HudMode::Suspended { .. } => Some(suspended_hide_button_rect()),
+        HudMode::Restored => Some(restored_hide_button_rect()),
+        HudMode::Rejoining { .. } => None,
     }
 }
 
@@ -768,4 +839,24 @@ fn start_restore_animation(hwnd: HWND) {
 
 fn wide(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_hud_position_is_top_centered_inside_roblox_window() {
+        let bounds = process::WindowBounds {
+            left: 100,
+            top: 200,
+            right: 1100,
+            bottom: 800,
+        };
+
+        assert_eq!(
+            default_hud_position(bounds, (SUSPENDED_WIDTH, HUD_HEIGHT)),
+            (436, 256)
+        );
+    }
 }

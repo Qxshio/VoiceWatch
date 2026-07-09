@@ -38,5 +38,7 @@ jobs:
           node --check extension/connect.js
           node --check extension/setup.js
           node --check extension/help.js
+          node --check extension/rejoin.js
+          node --check extension/rejoin_page.js
       - name: Manifest parse
         run: node -e "JSON.parse(require('fs').readFileSync('extension/manifest.json','utf8'))"

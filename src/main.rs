@@ -5,7 +5,6 @@ mod browser_support;
 mod countdown;
 mod ipc;
 mod messages;
-mod monitor;
 mod native_host_registration;
 mod native_messaging;
 mod overlay;
@@ -13,6 +12,7 @@ mod process;
 mod rejoin;
 mod roblox_logs;
 mod settings;
+mod settings_window;
 mod tray;
 
 use anyhow::{Context, Result};

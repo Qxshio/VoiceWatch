@@ -23,6 +23,9 @@ desktop app whether a check is useful:
 - If no visible Roblox game window exists, polling is paused.
 - If Roblox is actively using the microphone, polling is paused because VC is
   already active.
+- If smart polling is enabled and the mic has been quiet for more than 20
+  seconds after a successful not-suspended response, polling is paused until
+  local activity makes another check useful.
 - If the last sanitized Roblox response contains a future `bannedUntilMs`, the
   extension sleeps until that local countdown expires before asking Roblox
   again.
@@ -46,7 +49,7 @@ sequenceDiagram
     loop Poll interval
         Ext->>Host: poll_readiness_request
         Host->>Host: Check game window and microphone metadata
-        alt Roblox game visible and mic not active
+        alt Roblox game visible and polling useful
             Host-->>Ext: poll_readiness shouldPoll=true
             Ext->>Roblox: GET /v1/settings with browser credentials
             Roblox-->>Ext: Voice settings JSON
@@ -54,7 +57,7 @@ sequenceDiagram
             Host->>Tray: local IPC event
             Tray->>Tray: Update state and countdown
             Tray->>User: Compact Roblox-window HUD while suspended
-        else Roblox not in-game or mic already active
+        else Roblox not in-game, mic active, or smart-paused
             Host-->>Ext: poll_readiness shouldPoll=false
             Ext->>Ext: Skip Roblox web request
         end
@@ -72,7 +75,6 @@ native host acknowledgement; the named-pipe implementation is planned next.
 - `native_messaging.rs` reads and writes Chromium native messaging frames.
 - `app_state.rs` owns the voice state machine.
 - `countdown.rs` keeps countdown rendering local and monotonic.
-- `monitor.rs` decides when polling should happen.
 - `process.rs` checks for a visible Roblox game window and Windows microphone
   activity metadata for Roblox.
 - `roblox_logs.rs` extracts best-effort server information from local logs,
@@ -82,6 +84,7 @@ native host acknowledgement; the named-pipe implementation is planned next.
   `roblox://` deep link, with the browser page launcher kept as a fallback.
 - `overlay.rs` owns the compact suspension/restored HUD and restore notification
   fallback.
+- `settings_window.rs` owns the native settings UI.
 - `tray.rs` owns desktop tray runtime wiring.
 - `settings.rs` persists and validates local settings.
 

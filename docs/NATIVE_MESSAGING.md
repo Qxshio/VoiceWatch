@@ -72,6 +72,7 @@ Host readiness response:
 {
   "type": "poll_readiness",
   "requestId": "uuid",
+  "pollIntervalSeconds": 10,
   "shouldPoll": false,
   "robloxRunning": true,
   "robloxPlaying": true,
@@ -83,7 +84,10 @@ Host readiness response:
 
 If `shouldPoll` is false, the extension skips the Roblox web request for that
 interval. The host returns false when no visible Roblox game window exists, or
-when Windows reports Roblox is actively using the microphone.
+when Windows reports Roblox is actively using the microphone. With smart
+polling enabled, it also returns false after Roblox has been mic-quiet for more
+than 20 seconds and the last successful Roblox status said the user was not
+suspended.
 
 Legacy app request to extension:
 

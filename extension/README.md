@@ -28,7 +28,9 @@ request, it asks the desktop app whether a check is useful.
 The desktop app tells it to skip the request when:
 
 - no visible Roblox game window is open,
-- Roblox is already using the microphone.
+- Roblox is already using the microphone,
+- smart polling sees more than 20 seconds of mic silence after a clean
+  not-suspended result.
 
 The extension also sleeps locally while a known suspension countdown from the
 last Roblox response has not expired yet.

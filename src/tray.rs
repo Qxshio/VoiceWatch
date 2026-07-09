@@ -2,12 +2,13 @@ use crate::app_state::{AppState, VoiceState};
 use crate::browser_support;
 use crate::countdown::{format_remaining, now_wall_clock_ms};
 use crate::ipc::{self, IpcEvent};
-use crate::messages::VoiceStatusData;
+use crate::messages::{VoiceStatusData, VoiceStatusEnvelope};
 use crate::overlay;
 use crate::process;
 use crate::rejoin;
 use crate::roblox_logs;
 use crate::settings;
+use crate::settings_window;
 use anyhow::{Context, Result};
 use std::time::Duration;
 use tray_icon::{
@@ -112,6 +113,7 @@ struct TrayApp {
     state: AppState,
     hud: overlay::SuspensionHud,
     last_server: Option<rejoin::LastServer>,
+    test_suspension_until_ms: Option<i64>,
     setup_opened_on_startup: bool,
     tray_icon: Option<TrayIcon>,
     status_item: Option<MenuItem>,
@@ -127,6 +129,7 @@ impl TrayApp {
             state: AppState::default(),
             hud: overlay::SuspensionHud::default(),
             last_server: ipc::read_last_server(),
+            test_suspension_until_ms: None,
             setup_opened_on_startup: false,
             tray_icon: None,
             status_item: None,
@@ -281,18 +284,17 @@ impl TrayApp {
             "test_suspend" => {
                 if self.can_test_suspend() {
                     let now_ms = now_wall_clock_ms();
+                    let banned_until_ms = now_ms + TEST_SUSPENSION_SECONDS * 1000;
                     if let Some(server) = roblox_logs::detect_last_server_from_logs() {
                         self.remember_last_server(server);
                     }
-                    self.state
-                        .mark_test_suspended(now_ms, now_ms + TEST_SUSPENSION_SECONDS * 1000);
+                    self.test_suspension_until_ms = Some(banned_until_ms);
+                    self.state.mark_test_suspended(now_ms, banned_until_ms);
                     self.refresh_tray();
                 }
             }
             "settings" => {
-                if let Ok(path) = settings::settings_path() {
-                    let _ = open::that(path);
-                }
+                let _ = settings_window::open();
             }
             _ => {}
         }
@@ -304,12 +306,23 @@ impl TrayApp {
                 self.state.mark_connected();
             }
             IpcEvent::ExtensionDisconnected { .. } => {
+                self.test_suspension_until_ms = None;
                 self.state.mark_disconnected();
             }
             IpcEvent::LastServer { server, .. } => {
                 self.remember_last_server(server);
             }
             IpcEvent::VoiceStatus { envelope, .. } => {
+                if should_ignore_voice_status_for_test_suspend(
+                    self.test_suspension_until_ms,
+                    &envelope,
+                    now_wall_clock_ms(),
+                ) {
+                    self.state.mark_connected();
+                    self.refresh_tray();
+                    return;
+                }
+                self.test_suspension_until_ms = None;
                 let was_restored = matches!(self.state.voice_state, VoiceState::Restored { .. });
                 self.state.apply_voice_status(envelope);
                 if matches!(self.state.voice_state, VoiceState::Restored { .. }) && !was_restored {
@@ -330,6 +343,7 @@ impl TrayApp {
                 .as_ref()
                 .is_some_and(|countdown| countdown.is_expired())
         {
+            self.test_suspension_until_ms = None;
             self.state.mark_restored(now_wall_clock_ms());
             self.announce_restored();
         }
@@ -376,6 +390,11 @@ impl TrayApp {
     }
 
     fn refresh_hud(&mut self) {
+        if !self.settings.show_overlay {
+            self.hud.hide();
+            return;
+        }
+
         match &self.state.voice_state {
             VoiceState::TempSuspended { .. } => {
                 let remaining = self
@@ -477,6 +496,25 @@ fn format_relative_time(checked_at_ms: i64, now_ms: i64) -> String {
     }
 }
 
+fn should_ignore_voice_status_for_test_suspend(
+    test_suspension_until_ms: Option<i64>,
+    envelope: &VoiceStatusEnvelope,
+    now_ms: i64,
+) -> bool {
+    let Some(test_suspension_until_ms) = test_suspension_until_ms else {
+        return false;
+    };
+
+    if now_ms >= test_suspension_until_ms {
+        return false;
+    }
+
+    envelope
+        .data
+        .as_ref()
+        .is_some_and(|data| envelope.ok && !data.is_banned)
+}
+
 fn plural(value: i64, unit: &str) -> String {
     if value == 1 {
         format!("1 {unit} ago")
@@ -526,5 +564,48 @@ mod tests {
             )),
             "file:///C:/Program%20Files/Voice%20Watch/setup.html"
         );
+    }
+
+    #[test]
+    fn test_suspend_ignores_restored_status_until_timer_finishes() {
+        let restored = voice_status(false);
+        let suspended = voice_status(true);
+
+        assert!(should_ignore_voice_status_for_test_suspend(
+            Some(20_000),
+            &restored,
+            10_000
+        ));
+        assert!(!should_ignore_voice_status_for_test_suspend(
+            Some(20_000),
+            &restored,
+            20_000
+        ));
+        assert!(!should_ignore_voice_status_for_test_suspend(
+            Some(20_000),
+            &suspended,
+            10_000
+        ));
+        assert!(!should_ignore_voice_status_for_test_suspend(
+            None, &restored, 10_000
+        ));
+    }
+
+    fn voice_status(is_banned: bool) -> VoiceStatusEnvelope {
+        VoiceStatusEnvelope {
+            request_id: "test".into(),
+            checked_at: 1_000,
+            ok: true,
+            data: Some(VoiceStatusData {
+                is_voice_enabled: !is_banned,
+                is_user_opt_in: true,
+                is_user_eligible: true,
+                is_banned,
+                ban_reason: if is_banned { Some(7) } else { None },
+                banned_until_ms: if is_banned { Some(20_000) } else { None },
+                denial_reason: if is_banned { Some(6) } else { None },
+            }),
+            error: None,
+        }
     }
 }

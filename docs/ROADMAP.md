@@ -13,6 +13,7 @@
 - [x] Add user-clicked rejoin target helper.
 - [x] Add compact Roblox-window suspension HUD.
 - [x] Add launch-on-startup integration.
+- [x] Add a settings native window.
 - [x] Add docs and setup scripts.
 - [x] Add Windows installer packaging and release artifact workflow.
 
@@ -20,7 +21,7 @@
 
 - [ ] Implement named-pipe IPC between native host mode and running tray app.
 - [ ] Let the tray app request status checks from the connected extension.
-- [ ] Add a settings/status native window.
+- [ ] Add a richer native status/debug window.
 - [ ] Add graceful rate-limit and repeated-failure backoff in the runtime loop.
 - [ ] Improve last-server parsing with real-world Roblox log samples.
 - [ ] Add release packaging and code signing notes.

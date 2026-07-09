@@ -34,6 +34,8 @@ jobs:
           node --check extension/connect.js
           node --check extension/setup.js
           node --check extension/help.js
+          node --check extension/rejoin.js
+          node --check extension/rejoin_page.js
           node -e "JSON.parse(require('fs').readFileSync('extension/manifest.json','utf8'))"
 
       - name: Build release executable
@@ -78,4 +80,4 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" dist/* --generate-notes
+        run: gh release create "${{ github.ref_name }}" dist/* --title "Voice Watch ${{ github.ref_name }} Open Beta" --generate-notes --prerelease

@@ -400,6 +400,7 @@ function requestPollReadiness() {
 function rememberPollReadiness(message) {
   nativeStatus = {
     ...nativeStatus,
+    pollIntervalSeconds: message.pollIntervalSeconds ?? nativeStatus.pollIntervalSeconds,
     pollPausedReason: message.shouldPoll ? null : message.reason || "paused",
     pollPausedMessage: message.shouldPoll ? null : message.message || "Checks are paused.",
     robloxRunning: Boolean(message.robloxRunning),

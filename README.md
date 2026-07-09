@@ -35,7 +35,10 @@ Voice Watch combines a local desktop app with a small browser connector:
    visible.
 6. If Windows reports that Roblox is actively using the microphone, Voice Watch
    pauses web checks because VC is already active.
-7. If Roblox reports a temporary suspension with an end time, Voice Watch waits
+7. If smart polling is enabled and Roblox has been mic-quiet for more than 20
+   seconds after a clean "not suspended" result, Voice Watch skips web checks
+   until local activity makes another check useful.
+8. If Roblox reports a temporary suspension with an end time, Voice Watch waits
    until that countdown expires before checking again.
 
 This keeps checks focused on the moments where they are useful: while you are in
@@ -86,17 +89,19 @@ Voice Watch currently includes:
 - Local countdown anchoring that is resilient to system clock changes after the
   status fetch.
 - Poll pause behavior while Roblox is using the microphone.
+- Smart polling pause behavior when Roblox has been mic-quiet for more than 20
+  seconds without a suspension.
 - Poll pause behavior while a known suspension countdown is still active.
 - Visible Roblox game-window detection so the lingering background client does
   not keep checks running after you leave a game.
 - Compact suspension HUD attached to the Roblox window, with a Rejoin button
   after VC is restored.
 - A tray menu and native dialog notification fallback for restore alerts.
+- Native settings window for polling, HUD, startup, sound, and developer-mode
+  preferences.
 - Startup launch enabled by default from the installer.
 - Development scripts for registering and unregistering the native messaging
   host.
-
-The polished settings UI is planned follow-up work.
 
 ## Requirements
 
@@ -152,9 +157,9 @@ Default settings:
   "onlyPollWhenRobloxRunning": true,
   "developerMode": false,
   "pausePollingWhileRobloxUsesMicrophone": true,
+  "smartPolling": true,
   "showOverlay": true,
   "playSoundOnRestore": true,
-  "overlayPosition": "top-right",
   "launchOnStartup": true
 }
 ```
@@ -166,6 +171,9 @@ When `pausePollingWhileRobloxUsesMicrophone` is enabled, Voice Watch pauses
 Roblox web checks while Windows reports that Roblox is actively using the
 microphone. Voice Watch does not read microphone audio; it only reads Windows'
 local microphone-use metadata for the Roblox executable.
+When `smartPolling` is enabled, Voice Watch pauses Roblox web checks after the
+mic has been quiet for more than 20 seconds and the last successful Roblox
+status said you were not suspended.
 When Roblox returns a temporary suspension end time, the browser connector waits
 for that local countdown to expire before asking Roblox again.
 
@@ -249,7 +257,6 @@ src/
   countdown.rs         Local anchored countdown math
   ipc.rs               IPC bridge abstraction for the native host/tray link
   messages.rs          Shared sanitized protocol models
-  monitor.rs           Polling decisions and backoff
   native_messaging.rs  Chromium native messaging framing
   overlay.rs           Compact suspension HUD and restore notification adapter
   process.rs           Roblox window and microphone activity detection
@@ -265,6 +272,7 @@ extension/
   connect.css
   connect.js
   rejoin.js
+  rejoin_page.js
   setup.html
   help.html
 

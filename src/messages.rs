@@ -42,6 +42,8 @@ pub enum AppMessage {
     PollReadiness {
         #[serde(rename = "requestId")]
         request_id: String,
+        #[serde(rename = "pollIntervalSeconds")]
+        poll_interval_seconds: u64,
         #[serde(rename = "shouldPoll")]
         should_poll: bool,
         #[serde(rename = "robloxRunning")]

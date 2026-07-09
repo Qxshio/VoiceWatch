@@ -8,6 +8,8 @@ use std::fs::{self, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
+const MAX_EVENT_LOG_BYTES: u64 = 1_000_000;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum IpcEvent {
@@ -117,6 +119,7 @@ fn publish_event(event: &IpcEvent) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
+    rotate_event_log_if_needed(&path)?;
 
     let mut file = OpenOptions::new()
         .create(true)
@@ -127,6 +130,18 @@ fn publish_event(event: &IpcEvent) -> Result<()> {
     file.write_all(b"\n")?;
     file.flush()?;
     Ok(())
+}
+
+fn rotate_event_log_if_needed(path: &std::path::Path) -> Result<()> {
+    if fs::metadata(path)
+        .map(|metadata| metadata.len())
+        .unwrap_or(0)
+        <= MAX_EVENT_LOG_BYTES
+    {
+        return Ok(());
+    }
+
+    fs::write(path, b"").with_context(|| format!("failed to rotate {}", path.display()))
 }
 
 fn read_connection_state() -> Result<ExtensionConnectionState> {
