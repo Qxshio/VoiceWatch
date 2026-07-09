@@ -44,6 +44,12 @@ Release builds statically link the Microsoft C runtime, so fresh Windows
 systems do not need a separate Visual C++ Redistributable install just to start
 Voice Watch.
 
+Voice Watch also checks GitHub Releases for newer public builds in the
+background. When a newer installer is available, the tray icon turns amber and a
+top-level `Update Available` button appears in the tray menu. Updates are
+user-clicked: Voice Watch downloads the new installer, closes itself, lets the
+installer refresh the app, then starts Voice Watch again.
+
 ## The problem Voice Watch solves
 
 Roblox voice chat suspensions can leave you guessing. The Roblox client may keep
@@ -128,6 +134,7 @@ Voice Watch currently includes:
 - Local countdown anchoring that is resilient to system clock changes after the
   status fetch.
 - Poll pause behavior while Roblox is using the microphone.
+- User-clicked auto-update flow from GitHub Releases.
 - Smart polling pause behavior when Roblox has been mic-quiet for more than 20
   seconds without a suspension.
 - Poll pause behavior while a known suspension countdown is still active.

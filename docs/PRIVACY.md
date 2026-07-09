@@ -84,3 +84,11 @@ user's privacy registry entries for the running Roblox executable. This only
 answers whether Windows currently considers Roblox to be using the microphone.
 Voice Watch uses that signal to pause Roblox web checks while VC is already
 active.
+
+## Update checks
+
+The desktop app periodically requests public Voice Watch release metadata from
+GitHub. If a newer installer is available, the tray menu shows an update button.
+The installer is downloaded only after the user clicks that button. Update
+checks do not include Roblox cookies, Roblox account data, browser cookies, or
+voice status payloads.

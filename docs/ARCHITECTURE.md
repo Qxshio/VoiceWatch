@@ -8,7 +8,7 @@ Voice Watch is split into two local components:
 The browser extension owns authenticated Roblox API access because the browser
 already has the user's Roblox session. The desktop app owns local UX: tray menu,
 countdown, restore notification, settings, Roblox game-window detection,
-microphone activity detection, and rejoin action.
+microphone activity detection, rejoin action, and update prompts.
 
 ## Runtime goal
 
@@ -85,6 +85,8 @@ native host acknowledgement; the named-pipe implementation is planned next.
 - `overlay.rs` owns the compact suspension/restored HUD and restore notification
   fallback.
 - `settings_window.rs` owns the native settings UI.
+- `updates.rs` checks GitHub Releases, downloads installer updates, and owns the
+  temporary helper mode used to install after the tray app exits.
 - `tray.rs` owns desktop tray runtime wiring.
 - `settings.rs` persists and validates local settings.
 

@@ -9,6 +9,7 @@ use crate::rejoin;
 use crate::roblox_logs;
 use crate::settings;
 use crate::settings_window;
+use crate::updates::{self, UpdateEvent, UpdateInfo};
 use anyhow::{Context, Result};
 use std::time::Duration;
 use tray_icon::{
@@ -17,13 +18,14 @@ use tray_icon::{
 };
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
-use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::window::WindowId;
 
 #[derive(Debug, Clone)]
 enum UserEvent {
     Menu(MenuEvent),
     Ipc(IpcEvent),
+    Update(UpdateEvent),
     Tick,
 }
 
@@ -33,9 +35,35 @@ struct MenuShape {
     has_countdown: bool,
     developer_mode: bool,
     can_test_suspend: bool,
+    update: UpdateMenuShape,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UpdateMenuShape {
+    Hidden,
+    Available,
+    Installing,
+    Failed,
+}
+
+#[derive(Debug, Clone)]
+enum UpdateTrayState {
+    Idle,
+    Available(UpdateInfo),
+    Installing(UpdateInfo),
+    Failed { info: UpdateInfo, message: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TrayIconStyle {
+    Normal,
+    UpdateAvailable,
+    Updating,
 }
 
 const TEST_SUSPENSION_SECONDS: i64 = 120;
+const UPDATE_CHECK_INITIAL_DELAY: Duration = Duration::from_secs(20);
+const UPDATE_CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 
 pub fn run_tray_app() -> Result<()> {
     let settings = settings::load_settings().context("failed to load settings")?;
@@ -68,7 +96,24 @@ pub fn run_tray_app() -> Result<()> {
         let _ = tick_proxy.send_event(UserEvent::Tick);
     });
 
-    let mut app = TrayApp::new(settings);
+    let update_proxy = event_loop.create_proxy();
+    std::thread::spawn(move || {
+        std::thread::sleep(UPDATE_CHECK_INITIAL_DELAY);
+        loop {
+            match updates::check_for_update() {
+                Ok(Some(info)) => {
+                    let _ =
+                        update_proxy.send_event(UserEvent::Update(UpdateEvent::Available(info)));
+                }
+                Ok(None) => {}
+                Err(error) => eprintln!("Update check failed: {error:#}"),
+            }
+            std::thread::sleep(UPDATE_CHECK_INTERVAL);
+        }
+    });
+
+    let app_proxy = event_loop.create_proxy();
+    let mut app = TrayApp::new(settings, app_proxy);
     event_loop.run_app(&mut app)?;
     Ok(())
 }
@@ -109,13 +154,17 @@ pub fn run_simulated_countdown(seconds: u64) -> Result<()> {
 }
 
 struct TrayApp {
+    proxy: EventLoopProxy<UserEvent>,
     settings: settings::Settings,
     state: AppState,
+    update_state: UpdateTrayState,
     hud: overlay::SuspensionHud,
     last_server: Option<rejoin::LastServer>,
     test_suspension_until_ms: Option<i64>,
     setup_opened_on_startup: bool,
     tray_icon: Option<TrayIcon>,
+    tray_icon_style: Option<TrayIconStyle>,
+    update_item: Option<MenuItem>,
     status_item: Option<MenuItem>,
     countdown_item: Option<MenuItem>,
     last_checked_item: Option<MenuItem>,
@@ -123,15 +172,19 @@ struct TrayApp {
 }
 
 impl TrayApp {
-    fn new(settings: settings::Settings) -> Self {
+    fn new(settings: settings::Settings, proxy: EventLoopProxy<UserEvent>) -> Self {
         Self {
+            proxy,
             settings,
             state: AppState::default(),
+            update_state: UpdateTrayState::Idle,
             hud: overlay::SuspensionHud::default(),
             last_server: ipc::read_last_server(),
             test_suspension_until_ms: None,
             setup_opened_on_startup: false,
             tray_icon: None,
+            tray_icon_style: None,
+            update_item: None,
             status_item: None,
             countdown_item: None,
             last_checked_item: None,
@@ -146,7 +199,7 @@ impl TrayApp {
         self.tray_icon = Some(
             TrayIconBuilder::new()
                 .with_tooltip("Voice Watch")
-                .with_icon(make_icon()?)
+                .with_icon(make_icon(TrayIconStyle::Normal)?)
                 .with_menu(Box::new(menu))
                 .build()?,
         );
@@ -163,6 +216,7 @@ impl TrayApp {
             has_countdown: self.state.countdown.is_some(),
             developer_mode: self.settings.developer_mode,
             can_test_suspend: self.can_test_suspend(),
+            update: self.update_state.menu_shape(),
         }
     }
 
@@ -185,6 +239,20 @@ impl TrayApp {
 
         menu.append(&title)?;
         menu.append(&PredefinedMenuItem::separator())?;
+
+        self.update_item = None;
+        if shape.update != UpdateMenuShape::Hidden {
+            let update = MenuItem::with_id(
+                "update",
+                self.update_state.menu_label(),
+                shape.update != UpdateMenuShape::Installing,
+                None,
+            );
+            menu.append(&update)?;
+            menu.append(&PredefinedMenuItem::separator())?;
+            self.update_item = Some(update);
+        }
+
         menu.append(&status)?;
 
         self.countdown_item = None;
@@ -237,10 +305,16 @@ impl TrayApp {
         }
 
         self.refresh_menu_labels();
+        self.refresh_tray_icon();
         self.refresh_hud();
     }
 
     fn refresh_menu_labels(&self) {
+        if let Some(item) = &self.update_item {
+            item.set_text(self.update_state.menu_label());
+            item.set_enabled(!matches!(self.update_state, UpdateTrayState::Installing(_)));
+        }
+
         if let Some(item) = &self.status_item {
             item.set_text(format!("Status: {}", self.state.voice_state.label()));
         }
@@ -296,6 +370,7 @@ impl TrayApp {
             "settings" => {
                 let _ = settings_window::open();
             }
+            "update" => self.start_update_install(),
             _ => {}
         }
     }
@@ -333,6 +408,24 @@ impl TrayApp {
         self.refresh_tray();
     }
 
+    fn handle_update(&mut self, event_loop: &ActiveEventLoop, event: UpdateEvent) {
+        match event {
+            UpdateEvent::Available(info) => {
+                if self.update_state.should_accept_available(&info) {
+                    self.update_state = UpdateTrayState::Available(info);
+                }
+            }
+            UpdateEvent::InstallLaunched => {
+                event_loop.exit();
+                return;
+            }
+            UpdateEvent::InstallFailed { info, message } => {
+                self.update_state = UpdateTrayState::Failed { info, message };
+            }
+        }
+        self.refresh_tray();
+    }
+
     fn handle_tick(&mut self) {
         self.reload_settings();
 
@@ -354,6 +447,55 @@ impl TrayApp {
         }
 
         self.refresh_tray();
+    }
+
+    fn start_update_install(&mut self) {
+        let Some(info) = self.update_state.update_info().cloned() else {
+            return;
+        };
+
+        self.update_state = UpdateTrayState::Installing(info.clone());
+        self.refresh_tray();
+
+        let proxy = self.proxy.clone();
+        std::thread::spawn(move || {
+            let event = match updates::download_and_launch_update(&info) {
+                Ok(()) => UpdateEvent::InstallLaunched,
+                Err(error) => UpdateEvent::InstallFailed {
+                    info,
+                    message: error.to_string(),
+                },
+            };
+            let _ = proxy.send_event(UserEvent::Update(event));
+        });
+    }
+
+    fn refresh_tray_icon(&mut self) {
+        let style = self.update_state.icon_style();
+        if self.tray_icon_style == Some(style) {
+            return;
+        }
+
+        if let Some(tray_icon) = &self.tray_icon {
+            if let Ok(icon) = make_icon(style) {
+                let _ = tray_icon.set_icon(Some(icon));
+            }
+            let tooltip = match &self.update_state {
+                UpdateTrayState::Available(info) => {
+                    format!("Voice Watch - Update {} available", info.version)
+                }
+                UpdateTrayState::Installing(info) => {
+                    format!("Voice Watch - Installing {}", info.version)
+                }
+                UpdateTrayState::Failed { message, .. } => {
+                    format!("Voice Watch - Update failed: {message}")
+                }
+                UpdateTrayState::Idle => "Voice Watch".into(),
+            };
+            let _ = tray_icon.set_tooltip(Some(tooltip));
+        }
+
+        self.tray_icon_style = Some(style);
     }
 
     fn reload_settings(&mut self) {
@@ -429,6 +571,7 @@ impl ApplicationHandler<UserEvent> for TrayApp {
         match event {
             UserEvent::Menu(menu_event) => self.handle_menu(event_loop, menu_event),
             UserEvent::Ipc(ipc_event) => self.handle_ipc(ipc_event),
+            UserEvent::Update(update_event) => self.handle_update(event_loop, update_event),
             UserEvent::Tick => self.handle_tick(),
         }
     }
@@ -523,9 +666,60 @@ fn plural(value: i64, unit: &str) -> String {
     }
 }
 
-fn make_icon() -> Result<Icon> {
+impl UpdateTrayState {
+    fn menu_shape(&self) -> UpdateMenuShape {
+        match self {
+            Self::Idle => UpdateMenuShape::Hidden,
+            Self::Available(_) => UpdateMenuShape::Available,
+            Self::Installing(_) => UpdateMenuShape::Installing,
+            Self::Failed { .. } => UpdateMenuShape::Failed,
+        }
+    }
+
+    fn update_info(&self) -> Option<&UpdateInfo> {
+        match self {
+            Self::Available(info) | Self::Installing(info) => Some(info),
+            Self::Failed { info, .. } => Some(info),
+            Self::Idle => None,
+        }
+    }
+
+    fn should_accept_available(&self, info: &UpdateInfo) -> bool {
+        match self {
+            Self::Installing(_) => false,
+            Self::Available(current) | Self::Failed { info: current, .. } => {
+                current.version != info.version
+            }
+            Self::Idle => true,
+        }
+    }
+
+    fn menu_label(&self) -> String {
+        match self {
+            Self::Idle => String::new(),
+            Self::Available(info) => format!("Update Available - v{}", info.version),
+            Self::Installing(info) => format!("Installing update v{}...", info.version),
+            Self::Failed { info, .. } => format!("Update failed - retry v{}", info.version),
+        }
+    }
+
+    fn icon_style(&self) -> TrayIconStyle {
+        match self {
+            Self::Idle => TrayIconStyle::Normal,
+            Self::Available(_) | Self::Failed { .. } => TrayIconStyle::UpdateAvailable,
+            Self::Installing(_) => TrayIconStyle::Updating,
+        }
+    }
+}
+
+fn make_icon(style: TrayIconStyle) -> Result<Icon> {
     const SIZE: u32 = 32;
     let mut rgba = Vec::with_capacity((SIZE * SIZE * 4) as usize);
+    let fill = match style {
+        TrayIconStyle::Normal => [42, 184, 120, 255],
+        TrayIconStyle::UpdateAvailable => [245, 168, 48, 255],
+        TrayIconStyle::Updating => [78, 154, 245, 255],
+    };
 
     for y in 0..SIZE {
         for x in 0..SIZE {
@@ -533,7 +727,14 @@ fn make_icon() -> Result<Icon> {
             let dy = y as i32 - 16;
             let inside = dx * dx + dy * dy <= 15 * 15;
             if inside {
-                rgba.extend_from_slice(&[42, 184, 120, 255]);
+                let marker = matches!(style, TrayIconStyle::UpdateAvailable)
+                    && (((13..=18).contains(&x) && (7..=22).contains(&y))
+                        || ((9..=22).contains(&x) && (7..=12).contains(&y)));
+                if marker {
+                    rgba.extend_from_slice(&[255, 255, 255, 255]);
+                } else {
+                    rgba.extend_from_slice(&fill);
+                }
             } else {
                 rgba.extend_from_slice(&[0, 0, 0, 0]);
             }

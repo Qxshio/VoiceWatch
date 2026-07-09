@@ -14,6 +14,7 @@ mod roblox_logs;
 mod settings;
 mod settings_window;
 mod tray;
+mod updates;
 
 use anyhow::{Context, Result};
 
@@ -49,6 +50,7 @@ fn main() -> Result<()> {
                 .context("expected seconds after --simulate-suspension")?;
             tray::run_simulated_countdown(seconds)
         }
+        Some("--apply-update") => updates::run_update_helper_from_args(args.collect::<Vec<_>>()),
         Some("--help") | Some("-h") => {
             print_help();
             Ok(())
