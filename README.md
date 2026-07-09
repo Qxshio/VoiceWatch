@@ -6,6 +6,9 @@ voice chat suspension timers and notifies you when VC is restored.
 This project is not affiliated with Roblox.
 
 <p>
+  <a href="https://github.com/sponsors/Qxshio">
+    <img src="https://img.shields.io/badge/Sponsor_on_GitHub-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white" alt="Sponsor Voice Watch on GitHub">
+  </a>
   <a href="https://ko-fi.com/qxshio">
     <img src="https://img.shields.io/badge/Support_on_Ko--fi-ff5f5f?style=for-the-badge&logo=kofi&logoColor=white" alt="Support Voice Watch on Ko-fi">
   </a>
@@ -19,7 +22,8 @@ fixing edge cases, testing across Windows and Chromium browsers, improving the
 installer and release flow, and keeping the app free, privacy-first, and
 uncluttered by ads or tracking.
 
-Support on Ko-fi: <https://ko-fi.com/qxshio>
+- Sponsor on GitHub: <https://github.com/sponsors/Qxshio>
+- Support on Ko-fi: <https://ko-fi.com/qxshio>
 
 ## Install from release
 
