@@ -1,6 +1,6 @@
 use crate::messages::NATIVE_HOST_NAME;
 use anyhow::{anyhow, Context, Result};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fs;
 use std::path::PathBuf;
@@ -38,6 +38,7 @@ impl BrowserTarget {
             edge_registry_path(),
             brave_registry_path(),
             vivaldi_registry_path(),
+            opera_chromium_registry_path(),
             opera_registry_path(),
             chromium_registry_path(),
         ];
@@ -48,7 +49,7 @@ impl BrowserTarget {
             Self::Edge => vec![edge_registry_path()],
             Self::Brave => vec![brave_registry_path()],
             Self::Vivaldi => vec![vivaldi_registry_path()],
-            Self::Opera => vec![opera_registry_path()],
+            Self::Opera => vec![opera_chromium_registry_path(), opera_registry_path()],
             Self::Chromium => vec![chromium_registry_path()],
         }
     }
@@ -81,6 +82,12 @@ struct NativeHostManifest {
     path: String,
     #[serde(rename = "type")]
     kind: &'static str,
+    allowed_origins: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ExistingNativeHostManifest {
+    #[serde(default)]
     allowed_origins: Vec<String>,
 }
 
@@ -126,7 +133,7 @@ pub fn register_native_host(
         description: "Voice Watch native messaging host",
         path: manifest_exe_path(&exe_path),
         kind: "stdio",
-        allowed_origins: vec![format!("chrome-extension://{extension_id}/")],
+        allowed_origins: merged_allowed_origins(&manifest_path, extension_id),
     };
     let manifest_json = serde_json::to_string_pretty(&manifest)?;
     fs::write(&manifest_path, manifest_json)
@@ -134,7 +141,7 @@ pub fn register_native_host(
 
     let manifest_path = manifest_path.to_string_lossy().to_string();
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    for path in browser.registry_paths() {
+    for path in dedup_registry_paths(browser.registry_paths()) {
         let (key, _) = hkcu
             .create_subkey(path)
             .with_context(|| format!("failed to create HKCU\\{path}"))?;
@@ -143,6 +150,30 @@ pub fn register_native_host(
     }
 
     Ok(RegistrationSummary { browser })
+}
+
+fn merged_allowed_origins(manifest_path: &std::path::Path, extension_id: &str) -> Vec<String> {
+    let new_origin = format!("chrome-extension://{extension_id}/");
+    let mut origins = fs::read_to_string(manifest_path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<ExistingNativeHostManifest>(&text).ok())
+        .map(|manifest| manifest.allowed_origins)
+        .unwrap_or_default();
+
+    origins.push(new_origin);
+    origins.sort();
+    origins.dedup();
+    origins
+}
+
+fn dedup_registry_paths(paths: Vec<&'static str>) -> Vec<&'static str> {
+    let mut deduped = Vec::new();
+    for path in paths {
+        if !deduped.contains(&path) {
+            deduped.push(path);
+        }
+    }
+    deduped
 }
 
 fn validate_extension_id(extension_id: &str) -> Result<()> {
@@ -238,6 +269,10 @@ fn opera_registry_path() -> &'static str {
     r"Software\Opera Software\Opera Stable\NativeMessagingHosts\com.voice_watch.native"
 }
 
+fn opera_chromium_registry_path() -> &'static str {
+    chrome_registry_path()
+}
+
 fn chromium_registry_path() -> &'static str {
     r"Software\Chromium\NativeMessagingHosts\com.voice_watch.native"
 }
@@ -267,6 +302,43 @@ mod tests {
         assert_eq!(
             BrowserTarget::parse("chromium").unwrap(),
             BrowserTarget::Chromium
+        );
+    }
+
+    #[test]
+    fn opera_uses_chrome_compatible_registry_path() {
+        let paths = BrowserTarget::Opera.registry_paths();
+
+        assert!(paths.contains(&chrome_registry_path()));
+        assert!(paths.contains(&opera_registry_path()));
+    }
+
+    #[test]
+    fn allowed_origins_are_merged_from_existing_manifest() {
+        let dir = tempfile::tempdir().unwrap();
+        let manifest_path = dir.path().join("com.voice_watch.native.json");
+        fs::write(
+            &manifest_path,
+            r#"{
+  "name": "com.voice_watch.native",
+  "description": "Voice Watch native messaging host",
+  "path": "C:\\VoiceWatch\\voice-watch.exe",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"
+  ]
+}"#,
+        )
+        .unwrap();
+
+        let origins = merged_allowed_origins(&manifest_path, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+
+        assert_eq!(
+            origins,
+            vec![
+                "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/".to_string(),
+                "chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/".to_string(),
+            ]
         );
     }
 

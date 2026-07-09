@@ -26,7 +26,10 @@ function Get-BrowserRegistryPaths {
         Edge = "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\$hostName"
         Brave = "HKCU:\Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\$hostName"
         Vivaldi = "HKCU:\Software\Vivaldi\NativeMessagingHosts\$hostName"
-        Opera = "HKCU:\Software\Opera Software\Opera Stable\NativeMessagingHosts\$hostName"
+        Opera = @(
+            "HKCU:\Software\Google\Chrome\NativeMessagingHosts\$hostName",
+            "HKCU:\Software\Opera Software\Opera Stable\NativeMessagingHosts\$hostName"
+        )
         Chromium = "HKCU:\Software\Chromium\NativeMessagingHosts\$hostName"
     }
 
@@ -42,10 +45,10 @@ function Get-BrowserRegistryPaths {
             $paths.Vivaldi,
             $paths.Opera,
             $paths.Chromium
-        )
+        ) | Select-Object -Unique
     }
 
-    return @($paths[$TargetBrowser])
+    return @($paths[$TargetBrowser]) | Select-Object -Unique
 }
 
 foreach ($registryPath in (Get-BrowserRegistryPaths $Browser)) {

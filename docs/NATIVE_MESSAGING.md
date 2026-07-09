@@ -27,6 +27,11 @@ The script writes a native messaging manifest under:
 It then registers that manifest under the current user's supported Chromium
 browser registry keys.
 
+Opera is also registered through the Chrome-compatible native messaging key.
+Opera's Windows native messaging documentation points to the Chrome registry
+location, so Voice Watch writes both that key and the Opera-specific key for
+compatibility.
+
 The browser starts the executable listed in the manifest and passes the calling
 extension origin as the first argument, for example
 `chrome-extension://<extension-id>`. Voice Watch treats that argument as native
@@ -40,7 +45,7 @@ Extension to host:
 ```json
 {
   "type": "hello",
-  "extensionVersion": "0.1.1",
+  "extensionVersion": "0.1.2",
   "protocolVersion": 1
 }
 ```
@@ -50,7 +55,7 @@ Host to extension:
 ```json
 {
   "type": "hello_ack",
-  "appVersion": "0.1.1",
+  "appVersion": "0.1.2",
   "protocolVersion": 1,
   "pollIntervalSeconds": 10
 }

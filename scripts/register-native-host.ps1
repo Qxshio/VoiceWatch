@@ -34,12 +34,27 @@ $manifestDir = Join-Path $env:LOCALAPPDATA "VoiceWatch\native-messaging"
 $manifestPath = Join-Path $manifestDir "$hostName.json"
 New-Item -ItemType Directory -Force -Path $manifestDir | Out-Null
 
+$origin = "chrome-extension://$ExtensionId/"
+$allowedOrigins = @()
+if (Test-Path -LiteralPath $manifestPath) {
+    try {
+        $existingManifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+        if ($existingManifest.allowed_origins) {
+            $allowedOrigins = @($existingManifest.allowed_origins)
+        }
+    }
+    catch {
+        $allowedOrigins = @()
+    }
+}
+$allowedOrigins = @($allowedOrigins + $origin) | Sort-Object -Unique
+
 $manifest = [ordered]@{
     name = $hostName
     description = "Voice Watch native messaging host"
     path = $resolvedExePath
     type = "stdio"
-    allowed_origins = @("chrome-extension://$ExtensionId/")
+    allowed_origins = $allowedOrigins
 }
 
 $manifest | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
@@ -59,7 +74,10 @@ function Get-BrowserRegistryPaths {
         Edge = "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\$hostName"
         Brave = "HKCU:\Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\$hostName"
         Vivaldi = "HKCU:\Software\Vivaldi\NativeMessagingHosts\$hostName"
-        Opera = "HKCU:\Software\Opera Software\Opera Stable\NativeMessagingHosts\$hostName"
+        Opera = @(
+            "HKCU:\Software\Google\Chrome\NativeMessagingHosts\$hostName",
+            "HKCU:\Software\Opera Software\Opera Stable\NativeMessagingHosts\$hostName"
+        )
         Chromium = "HKCU:\Software\Chromium\NativeMessagingHosts\$hostName"
     }
 
@@ -75,10 +93,10 @@ function Get-BrowserRegistryPaths {
             $paths.Vivaldi,
             $paths.Opera,
             $paths.Chromium
-        )
+        ) | Select-Object -Unique
     }
 
-    return @($paths[$TargetBrowser])
+    return @($paths[$TargetBrowser]) | Select-Object -Unique
 }
 
 foreach ($registryPath in (Get-BrowserRegistryPaths $Browser)) {
