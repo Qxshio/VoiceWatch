@@ -69,7 +69,7 @@ fn handle_protocol_url(url: &str) -> Result<()> {
             show_message(
                 "Voice Watch",
                 &format!(
-                    "Desktop connection registered for {}.\n\nReturn to your browser, reload the Voice Watch extension, then open the extension popup.",
+                    "Desktop connection registered for {}.\n\nReturn to your browser and open the Voice Watch extension popup. If it still shows the old status, close and reopen your browser once.",
                     summary.browser
                 ),
             );
