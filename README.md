@@ -5,6 +5,37 @@ voice chat suspension timers and notifies you when VC is restored.
 
 This project is not affiliated with Roblox.
 
+<p>
+  <a href="https://ko-fi.com/qxshio">
+    <img src="https://img.shields.io/badge/Support_on_Ko--fi-ff5f5f?style=for-the-badge&logo=kofi&logoColor=white" alt="Support Voice Watch on Ko-fi">
+  </a>
+</p>
+
+## Support the project
+
+Voice Watch is built and maintained as an independent open source project. If it
+helps you, donations make a real difference: they help me justify the time spent
+fixing edge cases, testing across Windows and Chromium browsers, improving the
+installer and release flow, and keeping the app free, privacy-first, and
+uncluttered by ads or tracking.
+
+Support on Ko-fi: <https://ko-fi.com/qxshio>
+
+## Install from release
+
+Download `VoiceWatch-<version>-Setup.exe` from
+<https://github.com/Qxshio/VoiceWatch/releases>.
+
+The installer:
+
+- installs Voice Watch for the current Windows user,
+- adds Start menu shortcuts,
+- optionally creates a desktop shortcut,
+- installs bundled extension/setup files for reference.
+
+Prebuilt standalone binaries are also attached to each release for users who
+prefer not to run an installer.
+
 ## The problem Voice Watch solves
 
 Roblox voice chat suspensions can leave you guessing. The Roblox client may keep
@@ -118,10 +149,10 @@ Contributor requirements:
 
 Install Rust from <https://rustup.rs/> if `cargo` is not available.
 
-## Run the desktop app
+## Build the desktop app
 
 ```powershell
-cargo run
+cargo build --release
 ```
 
 Useful development commands:
@@ -134,22 +165,7 @@ cargo run -- --print-config-path
 
 The settings file is created under `%APPDATA%\Voice Watch\settings.json`.
 
-## Install from release
-
-Download `VoiceWatch-<version>-Setup.exe` from
-<https://github.com/Qxshio/VoiceWatch/releases>.
-
-The installer:
-
-- installs Voice Watch for the current Windows user,
-- adds Start menu shortcuts,
-- optionally creates a desktop shortcut,
-- installs bundled extension/setup files for reference.
-
-Prebuilt standalone binaries are also attached to each release for users who
-prefer not to run an installer.
-
-Default settings:
+## Default settings
 
 ```json
 {
