@@ -1,8 +1,55 @@
+use std::collections::HashSet;
+use std::path::Path;
 use sysinfo::{ProcessRefreshKind, RefreshKind, System};
+use windows_sys::core::BOOL;
+use windows_sys::Win32::Foundation::{HWND, LPARAM};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    EnumWindows, GetWindowTextLengthW, GetWindowThreadProcessId, IsWindowVisible,
+};
+use winreg::enums::HKEY_CURRENT_USER;
+use winreg::RegKey;
 
 pub const ROBLOX_PLAYER_PROCESS: &str = "RobloxPlayerBeta.exe";
 
+const MICROPHONE_CONSENT_SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone\NonPackaged";
+const LAST_USED_TIME_START: &str = "LastUsedTimeStart";
+const LAST_USED_TIME_STOP: &str = "LastUsedTimeStop";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RobloxPresence {
+    pub process_running: bool,
+    pub game_window_visible: bool,
+    pub microphone_active: bool,
+}
+
+pub fn roblox_presence() -> RobloxPresence {
+    let processes = roblox_player_processes();
+    let process_ids = processes
+        .iter()
+        .map(|process| process.pid)
+        .collect::<HashSet<_>>();
+    let microphone_keys = processes
+        .iter()
+        .filter_map(|process| process.microphone_registry_key.as_deref())
+        .collect::<HashSet<_>>();
+
+    RobloxPresence {
+        process_running: !processes.is_empty(),
+        game_window_visible: has_visible_window_for_processes(&process_ids),
+        microphone_active: is_roblox_microphone_active(&microphone_keys),
+    }
+}
+
 pub fn is_roblox_running() -> bool {
+    roblox_presence().game_window_visible
+}
+
+struct RobloxProcess {
+    pid: u32,
+    microphone_registry_key: Option<String>,
+}
+
+fn roblox_player_processes() -> Vec<RobloxProcess> {
     let refresh = RefreshKind::new().with_processes(ProcessRefreshKind::new());
     let mut system = System::new_with_specifics(refresh);
     system.refresh_processes();
@@ -10,5 +57,110 @@ pub fn is_roblox_running() -> bool {
     system
         .processes()
         .values()
-        .any(|process| process.name().eq_ignore_ascii_case(ROBLOX_PLAYER_PROCESS))
+        .filter(|process| process.name().eq_ignore_ascii_case(ROBLOX_PLAYER_PROCESS))
+        .map(|process| RobloxProcess {
+            pid: process.pid().as_u32(),
+            microphone_registry_key: process.exe().and_then(microphone_registry_key_from_path),
+        })
+        .collect()
+}
+
+fn has_visible_window_for_processes(process_ids: &HashSet<u32>) -> bool {
+    if process_ids.is_empty() {
+        return false;
+    }
+
+    let mut search = WindowSearch {
+        process_ids,
+        found: false,
+    };
+
+    unsafe {
+        EnumWindows(
+            Some(enum_visible_process_window),
+            (&mut search as *mut WindowSearch).cast::<std::ffi::c_void>() as LPARAM,
+        );
+    }
+
+    search.found
+}
+
+struct WindowSearch<'a> {
+    process_ids: &'a HashSet<u32>,
+    found: bool,
+}
+
+unsafe extern "system" fn enum_visible_process_window(hwnd: HWND, lparam: LPARAM) -> BOOL {
+    let search = &mut *(lparam as *mut WindowSearch);
+
+    if IsWindowVisible(hwnd) == 0 {
+        return 1;
+    }
+
+    let mut process_id = 0;
+    GetWindowThreadProcessId(hwnd, &mut process_id);
+    if !search.process_ids.contains(&process_id) {
+        return 1;
+    }
+
+    if GetWindowTextLengthW(hwnd) <= 0 {
+        return 1;
+    }
+
+    search.found = true;
+    0
+}
+
+fn is_roblox_microphone_active(current_microphone_keys: &HashSet<&str>) -> bool {
+    if current_microphone_keys.is_empty() {
+        return false;
+    }
+
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let Ok(non_packaged) = hkcu.open_subkey(MICROPHONE_CONSENT_SUBKEY) else {
+        return false;
+    };
+
+    non_packaged.enum_keys().flatten().any(|key_name| {
+        current_microphone_keys.contains(key_name.as_str())
+            && non_packaged.open_subkey(&key_name).ok().is_some_and(|key| {
+                let start = key.get_value::<u64, _>(LAST_USED_TIME_START).unwrap_or(0);
+                let stop = key.get_value::<u64, _>(LAST_USED_TIME_STOP).unwrap_or(0);
+                microphone_entry_is_active(start, stop)
+            })
+    })
+}
+
+fn microphone_registry_key_from_path(path: &Path) -> Option<String> {
+    let path = path.to_string_lossy();
+    (!path.is_empty()).then(|| path.replace('\\', "#"))
+}
+
+fn microphone_entry_is_active(start: u64, stop: u64) -> bool {
+    start > 0 && stop <= start
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn microphone_registry_key_matches_windows_privacy_shape() {
+        assert_eq!(
+            microphone_registry_key_from_path(Path::new(
+                r"C:\Users\Tommy\AppData\Local\Roblox\Versions\version-1\RobloxPlayerBeta.exe"
+            ))
+            .unwrap(),
+            r"C:#Users#Tommy#AppData#Local#Roblox#Versions#version-1#RobloxPlayerBeta.exe"
+        );
+    }
+
+    #[test]
+    fn microphone_usage_is_active_until_stop_exceeds_start() {
+        assert!(microphone_entry_is_active(100, 0));
+        assert!(microphone_entry_is_active(100, 99));
+        assert!(microphone_entry_is_active(100, 100));
+        assert!(!microphone_entry_is_active(100, 101));
+        assert!(!microphone_entry_is_active(0, 0));
+    }
 }

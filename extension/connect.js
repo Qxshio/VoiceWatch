@@ -62,7 +62,9 @@ function renderStatus(response) {
     desktopStatus.textContent = nativeStatus.appVersion
       ? `Voice Watch ${nativeStatus.appVersion}`
       : "Connected";
-    desktopDetail.textContent = `Checking about every ${nativeStatus.pollIntervalSeconds ?? 10} seconds.`;
+    desktopDetail.textContent =
+      nativeStatus.pollPausedMessage ||
+      `Checking about every ${nativeStatus.pollIntervalSeconds ?? 10} seconds.`;
     disconnectButton.hidden = false;
   } else if (nativeStatus?.connecting) {
     connection.textContent = "Connecting to desktop app...";
@@ -77,10 +79,28 @@ function renderStatus(response) {
     disconnectButton.hidden = true;
   }
 
-  renderVoiceStatus(lastVoiceStatus);
+  renderVoiceStatus(lastVoiceStatus, nativeStatus);
 }
 
-function renderVoiceStatus(envelope) {
+function renderVoiceStatus(envelope, nativeStatus) {
+  if (nativeStatus?.microphoneActive) {
+    voiceStatus.textContent = "Active";
+    voiceDetail.textContent = "Roblox is using your microphone, so web checks are paused.";
+    if (!envelope) {
+      lastChecked.textContent = "--";
+      lastDetail.textContent = "Using local microphone activity.";
+    }
+    return;
+  }
+
+  if (nativeStatus?.pollPausedReason === "roblox_not_playing" && !envelope) {
+    voiceStatus.textContent = "Waiting";
+    voiceDetail.textContent = "Open a Roblox game to start checks.";
+    lastChecked.textContent = "--";
+    lastDetail.textContent = "No game window detected.";
+    return;
+  }
+
   if (!envelope) {
     voiceStatus.textContent = "Unknown";
     voiceDetail.textContent = "Waiting for the first status check.";

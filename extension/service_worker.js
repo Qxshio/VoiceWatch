@@ -8,10 +8,16 @@ let nativeStatus = {
   connecting: false,
   lastError: null,
   appVersion: null,
-  pollIntervalSeconds: 10
+  pollIntervalSeconds: 10,
+  pollPausedReason: null,
+  pollPausedMessage: null,
+  robloxRunning: null,
+  robloxPlaying: null,
+  microphoneActive: null
 };
 let lastVoiceStatus = null;
 let connectWaiters = [];
+let pollReadinessWaiters = new Map();
 let pollTimer = null;
 let pollInFlight = false;
 let intentionalDisconnect = false;
@@ -123,6 +129,11 @@ function connectNative() {
   nativePort.onMessage.addListener(handleNativeMessage);
   nativePort.onDisconnect.addListener(() => {
     stopPolling();
+    resolvePollReadinessWaiters({
+      shouldPoll: false,
+      reason: "desktop_disconnected",
+      message: "Desktop app disconnected."
+    });
     const lastError = intentionalDisconnect
       ? "Disconnected."
       : chrome.runtime.lastError?.message || "Native host disconnected.";
@@ -219,6 +230,11 @@ function disconnectNative() {
   };
   persistStatus();
   resolveConnectWaiters({ ok: false, nativeStatus });
+  resolvePollReadinessWaiters({
+    shouldPoll: false,
+    reason: "desktop_disconnected",
+    message: "Desktop app disconnected."
+  });
   return Promise.resolve({ ok: true, nativeStatus, lastVoiceStatus });
 }
 
@@ -229,11 +245,22 @@ function handleNativeMessage(message) {
       connected: true,
       lastError: null,
       appVersion: message.appVersion,
-      pollIntervalSeconds: message.pollIntervalSeconds ?? 10
+      pollIntervalSeconds: message.pollIntervalSeconds ?? 10,
+      pollPausedReason: null,
+      pollPausedMessage: null,
+      robloxRunning: null,
+      robloxPlaying: null,
+      microphoneActive: null
     };
     persistStatus();
     resolveConnectWaiters({ ok: true, nativeStatus });
     startPolling(true);
+    return;
+  }
+
+  if (message?.type === "poll_readiness") {
+    rememberPollReadiness(message);
+    resolvePollReadiness(message);
     return;
   }
 
@@ -278,12 +305,90 @@ async function pollVoiceStatus() {
 
   pollInFlight = true;
   try {
+    const readiness = await requestPollReadiness();
+    if (!readiness.shouldPoll) {
+      return;
+    }
+
     const envelope = await fetchVoiceStatus(newRequestId());
     await rememberVoiceStatus(envelope);
     postNative(envelope);
   } finally {
     pollInFlight = false;
     scheduleNextPoll();
+  }
+}
+
+function requestPollReadiness() {
+  if (!nativePort || !nativeStatus.connected) {
+    return Promise.resolve({
+      shouldPoll: false,
+      reason: "desktop_disconnected",
+      message: "Desktop app is not connected."
+    });
+  }
+
+  const requestId = newRequestId();
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      pollReadinessWaiters.delete(requestId);
+      resolve({
+        requestId,
+        shouldPoll: true,
+        reason: null,
+        message: null
+      });
+    }, 1500);
+
+    pollReadinessWaiters.set(requestId, { resolve, timeout });
+
+    try {
+      nativePort.postMessage({
+        type: "poll_readiness_request",
+        requestId
+      });
+    } catch (_error) {
+      clearTimeout(timeout);
+      pollReadinessWaiters.delete(requestId);
+      resolve({
+        requestId,
+        shouldPoll: true,
+        reason: null,
+        message: null
+      });
+    }
+  });
+}
+
+function rememberPollReadiness(message) {
+  nativeStatus = {
+    ...nativeStatus,
+    pollPausedReason: message.shouldPoll ? null : message.reason || "paused",
+    pollPausedMessage: message.shouldPoll ? null : message.message || "Checks are paused.",
+    robloxRunning: Boolean(message.robloxRunning),
+    robloxPlaying: Boolean(message.robloxPlaying),
+    microphoneActive: Boolean(message.microphoneActive)
+  };
+  persistStatus();
+}
+
+function resolvePollReadiness(message) {
+  const waiter = pollReadinessWaiters.get(message.requestId);
+  if (!waiter) {
+    return;
+  }
+
+  clearTimeout(waiter.timeout);
+  pollReadinessWaiters.delete(message.requestId);
+  waiter.resolve(message);
+}
+
+function resolvePollReadinessWaiters(message) {
+  const waiters = Array.from(pollReadinessWaiters.values());
+  pollReadinessWaiters.clear();
+  for (const waiter of waiters) {
+    clearTimeout(waiter.timeout);
+    waiter.resolve(message);
   }
 }
 

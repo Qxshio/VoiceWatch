@@ -13,6 +13,8 @@ const MAX_POLL_SECONDS: u64 = 300;
 pub struct Settings {
     pub poll_interval_seconds: u64,
     pub only_poll_when_roblox_running: bool,
+    #[serde(default = "default_true")]
+    pub pause_polling_while_roblox_uses_microphone: bool,
     pub show_overlay: bool,
     pub play_sound_on_restore: bool,
     pub overlay_position: OverlayPosition,
@@ -31,6 +33,7 @@ impl Default for Settings {
         Self {
             poll_interval_seconds: 10,
             only_poll_when_roblox_running: true,
+            pause_polling_while_roblox_uses_microphone: true,
             show_overlay: true,
             play_sound_on_restore: true,
             overlay_position: OverlayPosition::TopRight,
@@ -82,4 +85,8 @@ pub fn settings_path() -> Result<PathBuf> {
         .context("APPDATA or LOCALAPPDATA must be set on Windows")?;
 
     Ok(base.join(APP_DIR_NAME).join(SETTINGS_FILE_NAME))
+}
+
+fn default_true() -> bool {
+    true
 }

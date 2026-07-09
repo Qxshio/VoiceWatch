@@ -12,6 +12,10 @@ pub enum ExtensionMessage {
         #[serde(rename = "protocolVersion")]
         protocol_version: u32,
     },
+    PollReadinessRequest {
+        #[serde(rename = "requestId")]
+        request_id: String,
+    },
     Disconnect,
     VoiceStatus(VoiceStatusEnvelope),
 }
@@ -30,6 +34,20 @@ pub enum AppMessage {
     CheckVoiceStatus {
         #[serde(rename = "requestId")]
         request_id: String,
+    },
+    PollReadiness {
+        #[serde(rename = "requestId")]
+        request_id: String,
+        #[serde(rename = "shouldPoll")]
+        should_poll: bool,
+        #[serde(rename = "robloxRunning")]
+        roblox_running: bool,
+        #[serde(rename = "robloxPlaying")]
+        roblox_playing: bool,
+        #[serde(rename = "microphoneActive")]
+        microphone_active: bool,
+        reason: Option<String>,
+        message: Option<String>,
     },
     StatusAck {
         #[serde(rename = "requestId")]

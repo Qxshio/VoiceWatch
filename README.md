@@ -104,6 +104,7 @@ Default settings:
 {
   "pollIntervalSeconds": 10,
   "onlyPollWhenRobloxRunning": true,
+  "pausePollingWhileRobloxUsesMicrophone": true,
   "showOverlay": true,
   "playSoundOnRestore": true,
   "overlayPosition": "top-right",
@@ -112,6 +113,11 @@ Default settings:
 ```
 
 `pollIntervalSeconds` is clamped to 10-300 seconds.
+When `onlyPollWhenRobloxRunning` is enabled, Voice Watch waits for a visible
+Roblox game window instead of trusting the lingering background client process.
+When `pausePollingWhileRobloxUsesMicrophone` is enabled, Voice Watch pauses
+Roblox web checks while Windows reports that Roblox is actively using the
+microphone.
 
 ## Load the extension in a Chromium-based browser
 

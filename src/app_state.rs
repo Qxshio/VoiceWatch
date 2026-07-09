@@ -49,7 +49,7 @@ impl VoiceState {
         match self {
             VoiceState::Disconnected => "Disconnected".into(),
             VoiceState::Connected => "Connected".into(),
-            VoiceState::RobloxNotRunning => "Roblox not running".into(),
+            VoiceState::RobloxNotRunning => "Roblox not in game".into(),
             VoiceState::Checking => "Checking voice status".into(),
             VoiceState::VoiceOk { .. } => "Voice chat available".into(),
             VoiceState::TempSuspended { .. } => "Voice chat suspended".into(),
