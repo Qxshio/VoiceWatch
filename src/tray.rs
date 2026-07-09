@@ -23,8 +23,6 @@ enum UserEvent {
     Ipc(IpcEvent),
 }
 
-const EXTENSION_CONNECTION_MAX_AGE: Duration = Duration::from_secs(30 * 24 * 60 * 60);
-
 pub fn run_tray_app() -> Result<()> {
     let settings = settings::load_settings().context("failed to load settings")?;
     let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
@@ -111,13 +109,8 @@ struct TrayApp {
 
 impl TrayApp {
     fn new(_settings: settings::Settings) -> Self {
-        let mut state = AppState::default();
-        if ipc::extension_recently_connected(EXTENSION_CONNECTION_MAX_AGE) {
-            state.mark_connected();
-        }
-
         Self {
-            state,
+            state: AppState::default(),
             tray_icon: None,
             status_item: None,
             countdown_item: None,
@@ -205,10 +198,7 @@ impl TrayApp {
                 self.refresh_menu_labels();
             }
             "connect" => {
-                if ipc::extension_recently_connected(EXTENSION_CONNECTION_MAX_AGE) {
-                    self.state.mark_connected();
-                    self.refresh_menu_labels();
-                } else if let Ok(path) = extension_setup_page() {
+                if let Ok(path) = extension_setup_page() {
                     let _ = open::that(path);
                 }
             }

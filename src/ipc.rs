@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
-use std::time::Duration;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -58,23 +57,6 @@ pub fn publish_voice_status(envelope: VoiceStatusEnvelope) -> Result<()> {
         envelope,
         received_at_ms: now_wall_clock_ms(),
     })
-}
-
-pub fn extension_recently_connected(max_age: Duration) -> bool {
-    let Ok(state) = read_connection_state() else {
-        return false;
-    };
-
-    if state
-        .last_disconnected_at_ms
-        .is_some_and(|disconnected_at_ms| disconnected_at_ms >= state.last_connected_at_ms)
-    {
-        return false;
-    }
-
-    let now = now_wall_clock_ms();
-    let age_ms = now.saturating_sub(state.last_connected_at_ms);
-    age_ms <= max_age.as_millis() as i64
 }
 
 pub fn event_log_len() -> u64 {

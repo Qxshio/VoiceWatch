@@ -124,7 +124,7 @@ pub fn register_native_host(
     let manifest = NativeHostManifest {
         name: NATIVE_HOST_NAME,
         description: "Voice Watch native messaging host",
-        path: exe_path.to_string_lossy().to_string(),
+        path: manifest_exe_path(&exe_path),
         kind: "stdio",
         allowed_origins: vec![format!("chrome-extension://{extension_id}/")],
     };
@@ -207,6 +207,17 @@ fn manifest_path() -> Result<PathBuf> {
         .join(format!("{NATIVE_HOST_NAME}.json")))
 }
 
+fn manifest_exe_path(path: &std::path::Path) -> String {
+    strip_windows_verbatim_prefix(&path.to_string_lossy())
+}
+
+fn strip_windows_verbatim_prefix(path: &str) -> String {
+    path.strip_prefix(r"\\?\UNC\")
+        .map(|rest| format!(r"\\{rest}"))
+        .or_else(|| path.strip_prefix(r"\\?\").map(str::to_string))
+        .unwrap_or_else(|| path.to_string())
+}
+
 fn chrome_registry_path() -> &'static str {
     r"Software\Google\Chrome\NativeMessagingHosts\com.voice_watch.native"
 }
@@ -269,5 +280,17 @@ mod tests {
         assert!(error
             .to_string()
             .contains("extension ID must be exactly 32 lowercase letters"));
+    }
+
+    #[test]
+    fn strips_windows_verbatim_prefix_for_browser_manifest() {
+        assert_eq!(
+            strip_windows_verbatim_prefix(r"\\?\C:\Users\Tommy\App\voice-watch.exe"),
+            r"C:\Users\Tommy\App\voice-watch.exe"
+        );
+        assert_eq!(
+            strip_windows_verbatim_prefix(r"\\?\UNC\server\share\voice-watch.exe"),
+            r"\\server\share\voice-watch.exe"
+        );
     }
 }
