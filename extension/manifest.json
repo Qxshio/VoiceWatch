@@ -4,11 +4,18 @@
   "description": "Connects Roblox voice chat status to the local Voice Watch desktop app.",
   "version": "0.1.0",
   "permissions": ["nativeMessaging", "storage"],
-  "host_permissions": ["https://voice.roblox.com/*"],
+  "host_permissions": ["https://voice.roblox.com/*", "https://www.roblox.com/*"],
   "background": {
     "service_worker": "service_worker.js",
     "type": "module"
   },
+  "content_scripts": [
+    {
+      "matches": ["https://www.roblox.com/games/*"],
+      "js": ["rejoin.js"],
+      "run_at": "document_start"
+    }
+  ],
   "action": {
     "default_title": "Voice Watch",
     "default_popup": "connect.html"

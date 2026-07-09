@@ -23,6 +23,11 @@ fetch("https://voice.roblox.com/v1/settings", {
 
 The extension does not request the `cookies` permission.
 
+The extension also has access to Roblox game pages for the Rejoin helper. That
+helper only runs when a user-clicked Voice Watch link includes
+`voiceWatchRejoin=1`, and it uses Roblox's page launcher instead of sending
+cookies or tokens to the desktop app.
+
 ## What is sent to the desktop app
 
 Only this sanitized shape is sent:
@@ -62,9 +67,10 @@ Best-effort last-server detection reads local Roblox log files under:
 %LOCALAPPDATA%\Roblox\logs
 ```
 
-This is used only to detect `placeId` and `gameInstanceId` when available. The
-app does not read Roblox memory, inject into Roblox, or manipulate the Roblox
-process.
+This is used only to detect best-effort rejoin metadata such as `placeId`,
+`gameInstanceId`/`GameId`, `accessCode`, or `linkCode` when available. The app
+does not read Roblox memory, inject into the Roblox client, or manipulate the
+Roblox process.
 
 ## Microphone activity
 

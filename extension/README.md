@@ -9,6 +9,13 @@ It does not request the `cookies` permission, does not read browser cookie
 storage, and does not send `.ROBLOSECURITY` or any other token to the desktop
 app.
 
+## Rejoin helper
+
+When the desktop app opens a Roblox game page with `voiceWatchRejoin=1` in the
+URL, `rejoin.js` runs on that page and asks Roblox's own page launcher to join
+the last known server. It is only triggered by the user-clicked Rejoin action
+and only when the URL carries exact server metadata.
+
 ## How polling works
 
 The extension does not blindly call Roblox forever. Before each voice-status

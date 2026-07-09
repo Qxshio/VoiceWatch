@@ -28,3 +28,5 @@ Allowed behavior:
 - Desktop app reads local Roblox logs for best-effort rejoin metadata such as
   `placeId`, `gameInstanceId`/`GameId`, `accessCode`, or `linkCode`.
 - Desktop app opens a Roblox link after the user clicks a rejoin button.
+- Extension uses Roblox's page launcher only on the user-opened rejoin page and
+  only with the explicit metadata in that URL.

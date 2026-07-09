@@ -30,17 +30,22 @@ impl LastServer {
 pub fn rejoin_target_url(server: &LastServer) -> Option<String> {
     let place_id = server.place_id?;
 
-    let mut params = vec![format!("placeId={place_id}")];
+    let mut params = vec![
+        "voiceWatchRejoin=1".to_string(),
+        format!("placeId={place_id}"),
+    ];
+    if let Some(game_instance_id) = non_empty(server.game_instance_id.as_deref()) {
+        params.push(format!("gameInstanceId={}", url_escape(game_instance_id)));
+    }
     if let Some(access_code) = non_empty(server.access_code.as_deref()) {
         params.push(format!("accessCode={}", url_escape(access_code)));
-    } else if let Some(link_code) = non_empty(server.link_code.as_deref()) {
+    }
+    if let Some(link_code) = non_empty(server.link_code.as_deref()) {
         params.push(format!("linkCode={}", url_escape(link_code)));
-    } else if let Some(game_instance_id) = non_empty(server.game_instance_id.as_deref()) {
-        params.push(format!("gameInstanceId={}", url_escape(game_instance_id)));
     }
 
     Some(format!(
-        "https://www.roblox.com/games/start?{}",
+        "https://www.roblox.com/games/{place_id}/Voice-Watch?{}",
         params.join("&")
     ))
 }
@@ -79,7 +84,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn keeps_place_start_url_when_exact_server_missing() {
+    fn keeps_place_page_marker_when_exact_server_missing() {
         let server = LastServer {
             place_id: Some(123),
             game_instance_id: None,
@@ -89,7 +94,7 @@ mod tests {
         };
         assert_eq!(
             rejoin_target_url(&server).unwrap(),
-            "https://www.roblox.com/games/start?placeId=123"
+            "https://www.roblox.com/games/123/Voice-Watch?voiceWatchRejoin=1&placeId=123"
         );
     }
 
@@ -106,12 +111,12 @@ mod tests {
         assert!(server.can_rejoin_exact());
         assert_eq!(
             rejoin_target_url(&server).unwrap(),
-            "https://www.roblox.com/games/start?placeId=123&gameInstanceId=abc-def"
+            "https://www.roblox.com/games/123/Voice-Watch?voiceWatchRejoin=1&placeId=123&gameInstanceId=abc-def"
         );
     }
 
     #[test]
-    fn uses_private_server_access_code_before_game_instance() {
+    fn includes_private_server_access_code_with_marker() {
         let server = LastServer {
             place_id: Some(123),
             game_instance_id: Some("abc-def".into()),
@@ -122,7 +127,7 @@ mod tests {
 
         assert_eq!(
             rejoin_target_url(&server).unwrap(),
-            "https://www.roblox.com/games/start?placeId=123&accessCode=private%20code"
+            "https://www.roblox.com/games/123/Voice-Watch?voiceWatchRejoin=1&placeId=123&gameInstanceId=abc-def&accessCode=private%20code"
         );
     }
 }
