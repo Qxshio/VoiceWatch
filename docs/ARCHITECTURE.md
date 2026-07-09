@@ -59,7 +59,7 @@ sequenceDiagram
             Ext->>Ext: Skip Roblox web request
         end
     end
-    Tray->>User: Restore notification when confirmed
+    Tray->>User: Animated restored HUD with rejoin action
 ```
 
 The local IPC bridge between native host mode and the already running tray app
@@ -96,10 +96,9 @@ Ineligible
 AuthError
 NetworkError
 RateLimited
-ExpiredChecking
 Restored
 ```
 
 The app renders countdowns locally from `bannedUntilMs`. When the countdown
-reaches zero, it must check the real status again before showing the restored
-notification.
+reaches zero, the tray app moves directly into the restored HUD state and keeps
+the next browser status check as a correction path if Roblox later disagrees.

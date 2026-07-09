@@ -2,13 +2,15 @@ use crate::process;
 use crate::rejoin::{open_rejoin_target, LastServer};
 use anyhow::Result;
 use std::sync::{Mutex, Once, OnceLock};
+use std::time::{Duration, Instant};
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{
     BeginPaint, CreatePen, CreateSolidBrush, DeleteObject, DrawTextW, EndPaint, GetStockObject,
-    InvalidateRect, RoundRect, SelectObject, SetBkMode, SetTextColor, DEFAULT_GUI_FONT, DT_CENTER,
-    DT_END_ELLIPSIS, DT_LEFT, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, HGDIOBJ, PAINTSTRUCT,
-    PS_SOLID, TRANSPARENT,
+    InvalidateRect, LineTo, MoveToEx, RoundRect, SelectObject, SetBkMode, SetTextColor,
+    DEFAULT_GUI_FONT, DT_CENTER, DT_END_ELLIPSIS, DT_LEFT, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER,
+    HGDIOBJ, PAINTSTRUCT, PS_SOLID, TRANSPARENT,
 };
+use windows_sys::Win32::System::Diagnostics::Debug::MessageBeep;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, GetClientRect, LoadCursorW, MessageBoxW,
@@ -34,6 +36,7 @@ enum HudMode {
 struct HudState {
     mode: HudMode,
     last_server: Option<LastServer>,
+    restored_started_at: Option<Instant>,
 }
 
 impl Default for HudState {
@@ -43,6 +46,7 @@ impl Default for HudState {
                 remaining: "--".into(),
             },
             last_server: None,
+            restored_started_at: None,
         }
     }
 }
@@ -57,9 +61,16 @@ const SUSPENDED_WIDTH: i32 = 286;
 const RESTORED_WIDTH: i32 = 326;
 const HUD_HEIGHT: i32 = 42;
 const HUD_TOP_OFFSET: i32 = 12;
+const RESTORE_ANIMATION_MS: u64 = 850;
 
 static REGISTER_HUD_CLASS: Once = Once::new();
 static HUD_SHARED: OnceLock<Mutex<HudState>> = OnceLock::new();
+
+pub fn play_restore_sound() {
+    unsafe {
+        MessageBeep(MB_ICONINFORMATION);
+    }
+}
 
 pub fn show_restored_overlay(last_server: Option<&LastServer>) -> Result<OverlayAction> {
     let can_rejoin = last_server.is_some_and(LastServer::is_actionable);
@@ -95,17 +106,32 @@ pub fn show_restored_overlay(last_server: Option<&LastServer>) -> Result<Overlay
 
 impl SuspensionHud {
     pub fn show_suspended(&mut self, remaining: String) {
-        self.set_state(HudState {
+        *hud_shared().lock().expect("HUD state mutex poisoned") = HudState {
             mode: HudMode::Suspended { remaining },
             last_server: None,
-        });
+            restored_started_at: None,
+        };
+        self.present_current_state();
     }
 
     pub fn show_restored(&mut self, last_server: Option<LastServer>) {
-        self.set_state(HudState {
-            mode: HudMode::Restored,
-            last_server,
-        });
+        let should_animate = {
+            let mut state = hud_shared().lock().expect("HUD state mutex poisoned");
+            let should_animate = !matches!(state.mode, HudMode::Restored);
+            state.mode = HudMode::Restored;
+            state.last_server = last_server;
+            if should_animate || state.restored_started_at.is_none() {
+                state.restored_started_at = Some(Instant::now());
+            }
+            should_animate
+        };
+
+        let hwnd = self.present_current_state();
+        if should_animate {
+            if let Some(hwnd) = hwnd {
+                start_restore_animation(hwnd);
+            }
+        }
     }
 
     pub fn hide(&mut self) {
@@ -116,17 +142,15 @@ impl SuspensionHud {
         }
     }
 
-    fn set_state(&mut self, state: HudState) {
-        *hud_shared().lock().expect("HUD state mutex poisoned") = state;
-
+    fn present_current_state(&mut self) -> Option<HWND> {
         let Some(bounds) = process::roblox_window_bounds() else {
             self.hide();
-            return;
+            return None;
         };
 
         let hwnd = self.ensure_window();
         if hwnd.is_null() {
-            return;
+            return None;
         }
 
         let size = hud_size();
@@ -145,6 +169,7 @@ impl SuspensionHud {
             );
             InvalidateRect(hwnd, std::ptr::null(), 1);
         }
+        Some(hwnd)
     }
 
     fn ensure_window(&mut self) -> HWND {
@@ -261,6 +286,11 @@ fn paint_hud(hwnd: HWND) {
         .lock()
         .expect("HUD state mutex poisoned")
         .clone();
+    let restore_progress = if matches!(state.mode, HudMode::Restored) {
+        restored_animation_progress(&state)
+    } else {
+        1.0
+    };
 
     unsafe {
         let mut paint = PAINTSTRUCT::default();
@@ -268,8 +298,17 @@ fn paint_hud(hwnd: HWND) {
         let mut client = RECT::default();
         GetClientRect(hwnd, &mut client);
 
-        let background = CreateSolidBrush(rgb(35, 37, 39));
-        let border = CreatePen(PS_SOLID, 1, rgb(66, 69, 73));
+        let flash = if matches!(state.mode, HudMode::Restored) {
+            (1.0 - restore_progress).max(0.0) * 0.38
+        } else {
+            0.0
+        };
+        let background = CreateSolidBrush(blend_color(rgb(35, 37, 39), rgb(34, 62, 47), flash));
+        let border = CreatePen(
+            PS_SOLID,
+            1,
+            blend_color(rgb(66, 69, 73), rgb(63, 203, 121), flash),
+        );
         let old_brush = SelectObject(hdc, background as HGDIOBJ);
         let old_pen = SelectObject(hdc, border as HGDIOBJ);
         RoundRect(
@@ -291,7 +330,7 @@ fn paint_hud(hwnd: HWND) {
 
         match state.mode {
             HudMode::Suspended { remaining } => paint_suspended(hdc, remaining),
-            HudMode::Restored => paint_restored(hdc, state.last_server.as_ref()),
+            HudMode::Restored => paint_restored(hdc, state.last_server.as_ref(), restore_progress),
         }
 
         EndPaint(hwnd, &paint);
@@ -340,12 +379,49 @@ fn paint_suspended(hdc: windows_sys::Win32::Graphics::Gdi::HDC, remaining: Strin
     );
 }
 
-fn paint_restored(hdc: windows_sys::Win32::Graphics::Gdi::HDC, last_server: Option<&LastServer>) {
+fn paint_restored(
+    hdc: windows_sys::Win32::Graphics::Gdi::HDC,
+    last_server: Option<&LastServer>,
+    progress: f32,
+) {
+    let eased = ease_out_cubic(progress);
+    let badge = RECT {
+        left: 10,
+        top: 8,
+        right: 36,
+        bottom: 32,
+    };
+    let badge_flash = (1.0 - progress).max(0.0) * 0.55;
+
+    unsafe {
+        let badge_brush = CreateSolidBrush(blend_color(
+            rgb(42, 184, 120),
+            rgb(96, 236, 151),
+            badge_flash,
+        ));
+        let badge_pen = CreatePen(PS_SOLID, 1, rgb(83, 218, 138));
+        let old_brush = SelectObject(hdc, badge_brush as HGDIOBJ);
+        let old_pen = SelectObject(hdc, badge_pen as HGDIOBJ);
+        RoundRect(hdc, badge.left, badge.top, badge.right, badge.bottom, 8, 8);
+        SelectObject(hdc, old_pen);
+        SelectObject(hdc, old_brush);
+        DeleteObject(badge_pen as HGDIOBJ);
+        DeleteObject(badge_brush as HGDIOBJ);
+
+        let check_pen = CreatePen(PS_SOLID, 2, rgb(255, 255, 255));
+        let old_pen = SelectObject(hdc, check_pen as HGDIOBJ);
+        MoveToEx(hdc, 17, 21, std::ptr::null_mut());
+        LineTo(hdc, 22, 26);
+        LineTo(hdc, 31, 16);
+        SelectObject(hdc, old_pen);
+        DeleteObject(check_pen as HGDIOBJ);
+    }
+
     draw_text(
         hdc,
         "Voice restored",
         RECT {
-            left: 14,
+            left: 46,
             top: 0,
             right: 214,
             bottom: HUD_HEIGHT,
@@ -389,6 +465,29 @@ fn paint_restored(hdc: windows_sys::Win32::Graphics::Gdi::HDC, last_server: Opti
         text_color,
         DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
     );
+
+    let sweep_width = ((RESTORED_WIDTH - 20) as f32 * eased).round() as i32;
+    if sweep_width > 0 && progress < 1.0 {
+        unsafe {
+            let brush = CreateSolidBrush(rgb(42, 184, 120));
+            let pen = CreatePen(PS_SOLID, 1, rgb(42, 184, 120));
+            let old_brush = SelectObject(hdc, brush as HGDIOBJ);
+            let old_pen = SelectObject(hdc, pen as HGDIOBJ);
+            RoundRect(
+                hdc,
+                10,
+                HUD_HEIGHT - 4,
+                10 + sweep_width,
+                HUD_HEIGHT - 2,
+                2,
+                2,
+            );
+            SelectObject(hdc, old_pen);
+            SelectObject(hdc, old_brush);
+            DeleteObject(pen as HGDIOBJ);
+            DeleteObject(brush as HGDIOBJ);
+        }
+    }
 }
 
 fn draw_text(
@@ -426,6 +525,46 @@ fn lparam_point(lparam: LPARAM) -> (i32, i32) {
 
 fn rgb(red: u8, green: u8, blue: u8) -> u32 {
     u32::from(red) | (u32::from(green) << 8) | (u32::from(blue) << 16)
+}
+
+fn blend_color(from: u32, to: u32, amount: f32) -> u32 {
+    let amount = amount.clamp(0.0, 1.0);
+    let blend = |shift: u32| {
+        let start = ((from >> shift) & 0xff_u32) as f32;
+        let end = ((to >> shift) & 0xff_u32) as f32;
+        (start + ((end - start) * amount)).round() as u8
+    };
+
+    rgb(blend(0), blend(8), blend(16))
+}
+
+fn restored_animation_progress(state: &HudState) -> f32 {
+    let Some(started_at) = state.restored_started_at else {
+        return 1.0;
+    };
+
+    (started_at.elapsed().as_millis() as f32 / RESTORE_ANIMATION_MS as f32).clamp(0.0, 1.0)
+}
+
+fn ease_out_cubic(value: f32) -> f32 {
+    1.0 - (1.0 - value).powi(3)
+}
+
+fn start_restore_animation(hwnd: HWND) {
+    let hwnd_value = hwnd as isize;
+    std::thread::spawn(move || {
+        let started_at = Instant::now();
+        let duration = Duration::from_millis(RESTORE_ANIMATION_MS);
+        while started_at.elapsed() <= duration {
+            unsafe {
+                InvalidateRect(hwnd_value as HWND, std::ptr::null(), 1);
+            }
+            std::thread::sleep(Duration::from_millis(16));
+        }
+        unsafe {
+            InvalidateRect(hwnd_value as HWND, std::ptr::null(), 1);
+        }
+    });
 }
 
 fn wide(value: &str) -> Vec<u16> {

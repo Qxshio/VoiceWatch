@@ -18,7 +18,7 @@ Voice Watch exists to answer one practical question:
 
 It runs quietly in the Windows tray, tracks the sanitized VC status returned by
 Roblox, shows a local countdown when Roblox reports a temporary suspension, and
-notifies you when VC is confirmed restored.
+notifies you when VC is restored.
 
 ## What Voice Watch does
 
@@ -87,7 +87,7 @@ Voice Watch currently includes:
 - Visible Roblox game-window detection so the lingering background client does
   not keep checks running after you leave a game.
 - Compact suspension HUD attached to the Roblox window, with a Rejoin button
-  after VC is confirmed restored.
+  after VC is restored.
 - A tray menu and native dialog notification fallback for restore alerts.
 - Startup launch enabled by default from the installer.
 - Development scripts for registering and unregistering the native messaging

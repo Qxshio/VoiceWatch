@@ -38,7 +38,6 @@ pub enum VoiceState {
         checked_at_ms: i64,
         retry_after_ms: Option<i64>,
     },
-    ExpiredChecking,
     Restored {
         checked_at_ms: i64,
     },
@@ -58,7 +57,6 @@ impl VoiceState {
             VoiceState::AuthError { .. } => "Browser session not connected".into(),
             VoiceState::NetworkError { .. } => "Network error".into(),
             VoiceState::RateLimited { .. } => "Rate limited".into(),
-            VoiceState::ExpiredChecking => "Timer expired, confirming".into(),
             VoiceState::Restored { .. } => "Voice chat restored".into(),
         }
     }
@@ -111,8 +109,10 @@ impl AppState {
         self.voice_state = VoiceState::RobloxNotRunning;
     }
 
-    pub fn mark_expired_checking(&mut self) {
-        self.voice_state = VoiceState::ExpiredChecking;
+    pub fn mark_restored(&mut self, checked_at_ms: i64) {
+        self.last_checked_at_ms = Some(checked_at_ms);
+        self.countdown = None;
+        self.voice_state = VoiceState::Restored { checked_at_ms };
     }
 
     pub fn mark_test_suspended(&mut self, checked_at_ms: i64, banned_until_ms: i64) {
@@ -203,9 +203,9 @@ impl AppState {
         if data.is_voice_enabled && data.is_user_opt_in && data.is_user_eligible {
             self.voice_state = if matches!(
                 self.voice_state,
-                VoiceState::ExpiredChecking
-                    | VoiceState::TempSuspended { .. }
+                VoiceState::TempSuspended { .. }
                     | VoiceState::SuspendedUnknownDuration { .. }
+                    | VoiceState::Restored { .. }
             ) {
                 VoiceState::Restored { checked_at_ms }
             } else {

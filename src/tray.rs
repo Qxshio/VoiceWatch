@@ -96,22 +96,11 @@ pub fn run_simulated_countdown(seconds: u64) -> Result<()> {
         std::thread::sleep(Duration::from_secs(1));
     }
 
-    state.mark_expired_checking();
-    state.apply_voice_status_data(
-        now_wall_clock_ms(),
-        VoiceStatusData {
-            is_voice_enabled: true,
-            is_user_opt_in: true,
-            is_user_eligible: true,
-            is_banned: false,
-            ban_reason: None,
-            banned_until_ms: None,
-            denial_reason: None,
-        },
-    );
+    state.mark_restored(now_wall_clock_ms());
 
     let last_server = roblox_logs::detect_last_server_from_logs();
     if matches!(state.voice_state, VoiceState::Restored { .. }) {
+        overlay::play_restore_sound();
         overlay::show_restored_overlay(last_server.as_ref())?;
     }
 
@@ -177,9 +166,7 @@ impl TrayApp {
     fn can_test_suspend(&self) -> bool {
         !matches!(
             self.state.voice_state,
-            VoiceState::TempSuspended { .. }
-                | VoiceState::SuspendedUnknownDuration { .. }
-                | VoiceState::ExpiredChecking
+            VoiceState::TempSuspended { .. } | VoiceState::SuspendedUnknownDuration { .. }
         )
     }
 
@@ -318,10 +305,10 @@ impl TrayApp {
                 self.state.mark_disconnected();
             }
             IpcEvent::VoiceStatus { envelope, .. } => {
+                let was_restored = matches!(self.state.voice_state, VoiceState::Restored { .. });
                 self.state.apply_voice_status(envelope);
-                if matches!(self.state.voice_state, VoiceState::Restored { .. }) {
-                    self.last_server = roblox_logs::detect_last_server_from_logs();
-                    self.state.restored_overlay_shown = true;
+                if matches!(self.state.voice_state, VoiceState::Restored { .. }) && !was_restored {
+                    self.announce_restored();
                 }
             }
         }
@@ -338,7 +325,8 @@ impl TrayApp {
                 .as_ref()
                 .is_some_and(|countdown| countdown.is_expired())
         {
-            self.state.mark_expired_checking();
+            self.state.mark_restored(now_wall_clock_ms());
+            self.announce_restored();
         }
 
         if !self.setup_opened_on_startup && !self.state.is_browser_connected() {
@@ -355,6 +343,21 @@ impl TrayApp {
         }
     }
 
+    fn announce_restored(&mut self) {
+        if let Some(server) = roblox_logs::detect_last_server_from_logs() {
+            self.last_server = Some(server);
+        }
+
+        if self.state.restored_overlay_shown {
+            return;
+        }
+
+        if self.settings.play_sound_on_restore {
+            overlay::play_restore_sound();
+        }
+        self.state.restored_overlay_shown = true;
+    }
+
     fn refresh_hud(&mut self) {
         match &self.state.voice_state {
             VoiceState::TempSuspended { .. } => {
@@ -368,9 +371,6 @@ impl TrayApp {
             }
             VoiceState::SuspendedUnknownDuration { .. } => {
                 self.hud.show_suspended("unknown".into());
-            }
-            VoiceState::ExpiredChecking => {
-                self.hud.show_suspended("confirming".into());
             }
             VoiceState::Restored { .. } => {
                 self.hud.show_restored(self.last_server.clone());
