@@ -6,12 +6,14 @@ const voiceStatus = document.querySelector("#voice-status");
 const voiceDetail = document.querySelector("#voice-detail");
 const lastChecked = document.querySelector("#last-checked");
 const lastDetail = document.querySelector("#last-detail");
+const finishSetupButton = document.querySelector("#finish-setup");
 const disconnectButton = document.querySelector("#disconnect");
 
 const hasExtensionRuntime =
   typeof chrome !== "undefined" && chrome.runtime?.sendMessage;
 
 if (hasExtensionRuntime) {
+  finishSetupButton.addEventListener("click", finishSetup);
   disconnectButton.addEventListener("click", disconnect);
   refreshStatus();
   setInterval(refreshStatus, 2000);
@@ -24,6 +26,7 @@ if (hasExtensionRuntime) {
   voiceDetail.textContent = "This page cannot read extension status from a normal tab.";
   lastChecked.textContent = "--";
   lastDetail.textContent = "Open setup.html for install steps.";
+  finishSetupButton.hidden = true;
 }
 
 async function refreshStatus() {
@@ -34,7 +37,25 @@ async function refreshStatus() {
     connection.textContent = "Cannot reach extension service";
     desktopStatus.textContent = "Error";
     desktopDetail.textContent = error.message || String(error);
+    finishSetupButton.hidden = true;
     disconnectButton.hidden = true;
+  }
+}
+
+async function finishSetup() {
+  finishSetupButton.disabled = true;
+  result.textContent = "Opening Voice Watch setup...";
+
+  try {
+    window.location.href = registrationLink(chrome.runtime.id, "all");
+
+    window.setTimeout(() => {
+      refreshStatus();
+      finishSetupButton.disabled = false;
+    }, 1600);
+  } catch (error) {
+    result.textContent = error.message || String(error);
+    finishSetupButton.disabled = false;
   }
 }
 
@@ -67,17 +88,20 @@ function renderStatus(response) {
         ? "Desktop bridge is ready. Roblox is logged out in this browser."
         : nativeStatus.pollPausedMessage ||
           `Checking about every ${nativeStatus.pollIntervalSeconds ?? 10} seconds.`;
+    finishSetupButton.hidden = true;
     disconnectButton.hidden = false;
   } else if (nativeStatus?.connecting) {
     connection.textContent = "Connecting to desktop app...";
     desktopStatus.textContent = "Connecting";
     desktopDetail.textContent = "Waiting for Voice Watch to reply.";
+    finishSetupButton.hidden = true;
     disconnectButton.hidden = true;
   } else {
     connection.textContent = "Desktop not connected";
     desktopStatus.textContent = "Disconnected";
     desktopDetail.textContent =
-      nativeStatus?.lastError || "Open Voice Watch from the tray to finish setup.";
+      nativeStatus?.lastError || "Click Finish setup to connect this browser.";
+    finishSetupButton.hidden = false;
     disconnectButton.hidden = true;
   }
 
@@ -170,4 +194,8 @@ function formatDateTime(value) {
     hour: "numeric",
     minute: "2-digit"
   });
+}
+
+function registrationLink(extensionId, browser) {
+  return `voice-watch://register-native-host?extensionId=${extensionId}&browser=${encodeURIComponent(browser)}`;
 }

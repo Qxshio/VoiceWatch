@@ -231,9 +231,13 @@ For development:
 3. Choose your browser and follow the setup page.
 4. In your browser, enable developer mode.
 5. Choose **Load unpacked** and select the `extension/` folder.
-6. Copy the generated extension ID.
-7. Paste the extension ID into the setup page and choose
-   **Register with Voice Watch**.
+6. The extension opens a **Finish Voice Watch setup** tab.
+7. Choose **Finish setup** and allow Windows to open Voice Watch.
+
+If the finish tab does not appear, open the Voice Watch extension icon in the
+browser toolbar and choose **Finish setup** there. The extension supplies its
+own browser ID automatically, so normal setup does not require copying or
+pasting an extension ID.
 
 Manual fallback:
 

@@ -76,6 +76,7 @@ strong {
 
 .actions {
   display: flex;
+  gap: 10px;
   justify-content: flex-end;
   margin-top: 14px;
 }
@@ -87,9 +88,14 @@ button {
   border-radius: 7px;
   font: inherit;
   font-weight: 650;
+  color: #07130e;
+  background: #2ab878;
+  cursor: pointer;
+}
+
+button.danger {
   color: #f4f7fb;
   background: #b84b4b;
-  cursor: pointer;
 }
 
 button:disabled {

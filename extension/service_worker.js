@@ -46,11 +46,14 @@ const statusHydration = chrome.storage.local
     manuallyDisconnected = Boolean(stored.manuallyDisconnected);
   });
 
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener((details) => {
   ensureStatusHydrated().then(() => {
     manuallyDisconnected = false;
     persistStatus();
     connectNative();
+    if (details?.reason === "install") {
+      openSetupPage();
+    }
   });
 });
 
@@ -112,6 +115,16 @@ async function ensureStatusHydrated() {
 
 function persistStatus() {
   return chrome.storage.local.set({ nativeStatus, lastVoiceStatus, manuallyDisconnected, lastServer });
+}
+
+function openSetupPage() {
+  try {
+    chrome.tabs?.create?.({
+      url: `${chrome.runtime.getURL("setup.html")}?from=extension`
+    });
+  } catch (_error) {
+    // If a browser blocks tab creation here, the popup still offers Finish setup.
+  }
 }
 
 function connectNative() {

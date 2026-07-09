@@ -11,8 +11,8 @@
       <header>
         <span class="mark" aria-hidden="true"></span>
         <div>
-          <h1>Connect Voice Watch</h1>
-          <p>Load the browser connector, then let the desktop app register it for your browser.</p>
+          <h1>Set up Voice Watch</h1>
+          <p>Load the browser connector once, then finish the desktop connection from inside the extension.</p>
         </div>
       </header>
 
@@ -35,12 +35,24 @@
         <p>Voice Watch needs Chrome, Edge, Brave, Vivaldi, Opera, or Chromium for the browser connector. Install one of those browsers, then open this setup page again.</p>
       </section>
 
+      <section id="extension-finish" class="finish-page" hidden>
+        <span class="finish-mark" aria-hidden="true"></span>
+        <h2>Finish Voice Watch setup</h2>
+        <p>This page opened from the Voice Watch browser connector. It already knows the extension details, so there is no extension ID to copy.</p>
+        <p id="finish-status" class="status">Ready to register this browser with the desktop app.</p>
+        <div class="actions">
+          <button id="finish-setup" type="button">Finish setup</button>
+          <button id="finish-help" type="button">Browser help</button>
+        </div>
+        <p class="success">Windows may ask permission to open Voice Watch. Choose Open, then this page should change to the connected confirmation.</p>
+      </section>
+
       <div id="setup-flow">
         <section class="step">
           <div class="number">1</div>
           <div class="content">
-            <h2>Open your extensions page</h2>
-            <p>Voice Watch found your supported browser options. Use the help button for your browser, then turn on Developer mode and choose Load unpacked.</p>
+            <h2>Open browser setup help</h2>
+            <p>Choose the browser you want to use for Roblox. The help page shows where Developer mode and Load unpacked are in that browser.</p>
             <div id="browser-actions" class="actions">
               <button id="browser-help" type="button">Help me find it</button>
             </div>
@@ -68,31 +80,17 @@
         <section class="step">
           <div class="number">3</div>
           <div class="content">
-            <h2>Paste the extension ID</h2>
-            <p>The browser shows this ID on the Voice Watch extension card after you load it.</p>
-            <label for="extension-id">Extension ID</label>
-            <input id="extension-id" type="text" spellcheck="false" placeholder="32 letters, a-p only">
-            <p id="id-status" class="status">Waiting for extension ID.</p>
+            <h2>Finish from the extension tab</h2>
+            <p>After you choose Load unpacked, the Voice Watch extension opens a finish page. Click Finish setup there and let Windows open Voice Watch.</p>
+            <p class="success">If that tab does not appear, open the Voice Watch icon in your browser toolbar and click Finish setup.</p>
           </div>
         </section>
 
         <section class="step">
           <div class="number">4</div>
           <div class="content">
-            <h2>Register desktop connection</h2>
-            <p>Click the button below. Windows may ask to open Voice Watch. Choose Open.</p>
-            <div class="actions">
-              <button id="register" type="button" disabled>Register with Voice Watch</button>
-            </div>
-            <pre id="register-link" aria-live="polite"></pre>
-          </div>
-        </section>
-
-        <section class="step">
-          <div class="number">5</div>
-          <div class="content">
-            <h2>Open Voice Watch</h2>
-            <p>Open the Voice Watch icon in your browser toolbar. If it still shows the old status, close and reopen your browser once.</p>
+            <h2>Check the connection</h2>
+            <p>Open the Voice Watch icon in your browser toolbar. It should say Desktop connected. Keep Roblox logged in in this browser.</p>
             <p class="success">Success looks like: Desktop connected in the popup, and Status: Connected in the Voice Watch tray menu.</p>
           </div>
         </section>

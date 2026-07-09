@@ -169,7 +169,8 @@ pre {
   color: #d8e0e8;
 }
 
-.success-page {
+.success-page,
+.finish-page {
   margin-top: 12px;
   padding: 28px;
   border: 1px solid #2a6f51;
@@ -177,13 +178,23 @@ pre {
   background: #17231d;
 }
 
-.success-mark {
+.finish-page {
+  border-color: #33506f;
+  background: #17202b;
+}
+
+.success-mark,
+.finish-mark {
   position: relative;
   width: 54px;
   height: 54px;
   margin-bottom: 16px;
   border-radius: 50%;
   background: #2ab878;
+}
+
+.finish-mark {
+  background: #62a5ff;
 }
 
 .success-mark::after {
@@ -196,6 +207,25 @@ pre {
   border: solid #07130e;
   border-width: 0 5px 5px 0;
   transform: rotate(45deg);
+}
+
+.finish-mark::before,
+.finish-mark::after {
+  content: "";
+  position: absolute;
+  left: 16px;
+  width: 22px;
+  height: 5px;
+  border-radius: 999px;
+  background: #07130e;
+}
+
+.finish-mark::before {
+  top: 21px;
+}
+
+.finish-mark::after {
+  top: 29px;
 }
 
 .success-page ol {

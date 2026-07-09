@@ -46,8 +46,11 @@ only sanitized status fields back to the local app.
 3. Enable developer mode in that browser.
 4. Choose **Load unpacked**.
 5. Select this `extension/` folder.
-6. Copy the generated extension ID.
-7. Register the native host with that ID from the setup page.
+6. Use the **Finish Voice Watch setup** tab that opens from the extension.
+
+If the finish tab does not open, click the Voice Watch extension icon in the
+browser toolbar and choose **Finish setup**. The extension provides its own ID
+to the desktop app automatically.
 
 Manual fallback:
 

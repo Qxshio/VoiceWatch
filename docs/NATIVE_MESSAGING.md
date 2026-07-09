@@ -11,7 +11,12 @@ com.voice_watch.native
 
 ## Registration
 
-During development, build the app and register the host for the extension ID:
+During normal setup, the extension opens its own finish page after it is loaded.
+That page sends its browser-generated extension ID to the desktop app through a
+`voice-watch://register-native-host` link, so users do not need to copy the ID
+by hand.
+
+During development, the manual registration fallback is:
 
 ```powershell
 cargo build --release
@@ -45,7 +50,7 @@ Extension to host:
 ```json
 {
   "type": "hello",
-  "extensionVersion": "0.1.4",
+  "extensionVersion": "0.1.5",
   "protocolVersion": 1
 }
 ```
@@ -55,7 +60,7 @@ Host to extension:
 ```json
 {
   "type": "hello_ack",
-  "appVersion": "0.1.4",
+  "appVersion": "0.1.5",
   "protocolVersion": 1,
   "pollIntervalSeconds": 10
 }

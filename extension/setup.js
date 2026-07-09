@@ -1,19 +1,19 @@
 const setupFlow = document.querySelector("#setup-flow");
 const successPage = document.querySelector("#success-page");
 const unsupportedPage = document.querySelector("#unsupported-page");
+const extensionFinishPage = document.querySelector("#extension-finish");
 const successTitle = document.querySelector("#success-title");
 const successCopy = document.querySelector("#success-copy");
 const browserField = document.querySelector("#browser-field");
 const browserStatus = document.querySelector("#browser-status");
 const browserSelect = document.querySelector("#browser");
 const pathOutput = document.querySelector("#path");
-const registerLinkOutput = document.querySelector("#register-link");
-const extensionIdInput = document.querySelector("#extension-id");
-const idStatus = document.querySelector("#id-status");
+const finishStatus = document.querySelector("#finish-status");
 const browserHelpButton = document.querySelector("#browser-help");
+const finishHelpButton = document.querySelector("#finish-help");
+const finishSetupButton = document.querySelector("#finish-setup");
 const openFolderButton = document.querySelector("#open-folder");
 const copyPathButton = document.querySelector("#copy-path");
-const registerButton = document.querySelector("#register");
 const backToSetupButton = document.querySelector("#back-to-setup");
 
 const browsers = {
@@ -21,31 +21,33 @@ const browsers = {
   chrome: { label: "Google Chrome" },
   edge: { label: "Microsoft Edge" },
   vivaldi: { label: "Vivaldi" },
-  opera: { label: "Opera" },
+  opera: { label: "Opera or Opera GX" },
   chromium: { label: "Chromium" }
 };
 
 const params = new URLSearchParams(window.location.search);
-const folderPath = decodeURIComponent(
-  window.location.pathname.replace(/^\/([A-Za-z]:)/, "$1")
-)
-  .replace(/\/setup\.html$/i, "")
-  .replace(/\//g, "\\");
+const hasExtensionRuntime =
+  typeof chrome !== "undefined" && Boolean(chrome.runtime?.id);
+const isExtensionSetupPage =
+  hasExtensionRuntime && window.location.protocol === "chrome-extension:";
+const folderPath = currentFolderPath();
+let registrationStarted = false;
+let connectionPollTimer = null;
 
 pathOutput.textContent = folderPath;
 initialize();
 
-browserSelect.addEventListener("change", renderRegistration);
-extensionIdInput.addEventListener("input", renderRegistration);
+browserSelect.addEventListener("change", renderBrowserStatus);
 
 browserHelpButton.addEventListener("click", () => {
-  const browser = selectedBrowser();
-  if (!browser) {
-    return;
-  }
-
-  window.location.href = `help.html?browser=${encodeURIComponent(browser)}`;
+  openHelpForBrowser(selectedBrowser());
 });
+
+finishHelpButton.addEventListener("click", async () => {
+  openHelpForBrowser((await detectCurrentBrowser()) || "chrome");
+});
+
+finishSetupButton.addEventListener("click", finishExtensionSetup);
 
 openFolderButton.addEventListener("click", () => {
   window.location.href = "./";
@@ -56,42 +58,30 @@ copyPathButton.addEventListener("click", async () => {
   pathOutput.textContent = `Copied folder path:\n${folderPath}`;
 });
 
-registerButton.addEventListener("click", () => {
-  const extensionId = sanitizeExtensionId(extensionIdInput.value);
-  const browser = selectedBrowser();
-  if (!extensionId || !browser) {
-    renderRegistration();
-    return;
-  }
-
-  const link = registrationLink(extensionId, browser);
-  registerLinkOutput.textContent = `Opening Voice Watch setup:\n${link}`;
-  window.location.href = link;
-  setTimeout(() => {
-    showSuccess(
-      "Desktop connection registered",
-      "Voice Watch accepted the browser connector details."
-    );
-  }, 700);
-});
-
 backToSetupButton.addEventListener("click", () => {
+  clearConnectionPolling();
   successPage.hidden = true;
   unsupportedPage.hidden = true;
+  extensionFinishPage.hidden = true;
   setupFlow.hidden = false;
 });
 
 async function initialize() {
   const detectedBrowser = await detectCurrentBrowser();
-  const availableBrowsers = availableBrowserKeys(detectedBrowser);
 
+  if (isExtensionSetupPage) {
+    showExtensionFinish(detectedBrowser);
+    startConnectionPolling({ maxAttempts: 4, firstDelayMs: 250 });
+    return;
+  }
+
+  const availableBrowsers = availableBrowserKeys(detectedBrowser);
   if (availableBrowsers.length === 0) {
     showUnsupportedBrowser();
     return;
   }
 
   renderBrowserOptions(availableBrowsers, detectedBrowser);
-  renderRegistration();
 
   if (params.get("connected") === "1") {
     showSuccess(
@@ -99,6 +89,90 @@ async function initialize() {
       "The desktop app can already talk to the browser connector."
     );
   }
+}
+
+function showExtensionFinish(detectedBrowser) {
+  setupFlow.hidden = true;
+  successPage.hidden = true;
+  unsupportedPage.hidden = true;
+  extensionFinishPage.hidden = false;
+
+  const browserLabel = detectedBrowser
+    ? browsers[detectedBrowser]?.label || "this browser"
+    : "this browser";
+  finishStatus.textContent = `${browserLabel} is ready. Click Finish setup to connect it to the desktop app.`;
+}
+
+async function finishExtensionSetup() {
+  if (!hasExtensionRuntime) {
+    finishStatus.textContent = "Open this page from the installed browser extension.";
+    return;
+  }
+
+  registrationStarted = true;
+  finishSetupButton.disabled = true;
+  finishStatus.textContent = "Opening Voice Watch to finish the desktop connection.";
+
+  window.location.href = registrationLink(chrome.runtime.id, "all");
+
+  window.setTimeout(() => {
+    finishSetupButton.disabled = false;
+    finishStatus.textContent = "Waiting for the desktop app to confirm the connection.";
+  }, 1400);
+  startConnectionPolling({ maxAttempts: 12, firstDelayMs: 1400 });
+}
+
+function startConnectionPolling({ maxAttempts, firstDelayMs }) {
+  if (!hasExtensionRuntime || !chrome.runtime?.sendMessage) {
+    return;
+  }
+
+  clearConnectionPolling();
+  let attempts = 0;
+
+  const tick = async () => {
+    attempts += 1;
+    const connected = await refreshExtensionConnection();
+    if (connected || attempts >= maxAttempts) {
+      return;
+    }
+
+    connectionPollTimer = window.setTimeout(tick, attempts < 3 ? 1000 : 2000);
+  };
+
+  connectionPollTimer = window.setTimeout(tick, firstDelayMs);
+}
+
+function clearConnectionPolling() {
+  if (connectionPollTimer) {
+    window.clearTimeout(connectionPollTimer);
+    connectionPollTimer = null;
+  }
+}
+
+async function refreshExtensionConnection() {
+  try {
+    const response = await chrome.runtime.sendMessage({ type: "get_status" });
+    if (response?.nativeStatus?.connected) {
+      showSuccess(
+        "Voice Watch is connected",
+        "The desktop app and browser connector are ready."
+      );
+      return true;
+    }
+
+    if (registrationStarted) {
+      finishStatus.textContent =
+        response?.nativeStatus?.lastError ||
+        "Still waiting for Voice Watch. If Windows asks, choose Open Voice Watch.";
+    }
+  } catch (error) {
+    if (registrationStarted) {
+      finishStatus.textContent = error.message || String(error);
+    }
+  }
+
+  return false;
 }
 
 function availableBrowserKeys(detectedBrowser) {
@@ -132,11 +206,17 @@ function renderBrowserOptions(availableBrowsers, detectedBrowser) {
     browserSelect.value = preferred;
   }
 
-  if (availableBrowsers.length === 1) {
-    browserStatus.textContent = `Detected ${browsers[availableBrowsers[0]].label}.`;
-  } else {
-    browserStatus.textContent = "Choose the browser where you loaded Voice Watch.";
+  renderBrowserStatus();
+}
+
+function renderBrowserStatus() {
+  const selected = selectedBrowser();
+  if (!selected) {
+    browserStatus.textContent = "Choose the browser you will use for Roblox.";
+    return;
   }
+
+  browserStatus.textContent = `${browsers[selected].label} selected.`;
 }
 
 function preferredBrowser(availableBrowsers, detectedBrowser) {
@@ -151,8 +231,12 @@ function preferredBrowser(availableBrowsers, detectedBrowser) {
 }
 
 async function detectCurrentBrowser() {
-  if (navigator.brave?.isBrave && (await navigator.brave.isBrave())) {
-    return "brave";
+  try {
+    if (navigator.brave?.isBrave && (await navigator.brave.isBrave())) {
+      return "brave";
+    }
+  } catch (_error) {
+    // Some Chromium forks expose navigator.brave but reject the call.
   }
 
   const userAgent = navigator.userAgent;
@@ -178,35 +262,28 @@ async function detectCurrentBrowser() {
 function showUnsupportedBrowser() {
   setupFlow.hidden = true;
   successPage.hidden = true;
+  extensionFinishPage.hidden = true;
   unsupportedPage.hidden = false;
   browserField.hidden = true;
   browserHelpButton.disabled = true;
-  registerButton.disabled = true;
 }
 
 function showSuccess(title, copy) {
+  clearConnectionPolling();
   successTitle.textContent = title;
   successCopy.textContent = copy;
   setupFlow.hidden = true;
   unsupportedPage.hidden = true;
+  extensionFinishPage.hidden = true;
   successPage.hidden = false;
 }
 
-function renderRegistration() {
-  const extensionId = sanitizeExtensionId(extensionIdInput.value);
-  const browser = selectedBrowser();
-  const hasValidId = extensionId.length > 0;
-  const canRegister = hasValidId && Boolean(browser);
+function openHelpForBrowser(browser) {
+  if (!browser || !browsers[browser]) {
+    return;
+  }
 
-  idStatus.textContent = hasValidId
-    ? "Extension ID looks valid."
-    : "Paste the 32-character ID from the extension card.";
-  idStatus.classList.toggle("valid", hasValidId);
-  registerButton.disabled = !canRegister;
-
-  registerLinkOutput.textContent = canRegister
-    ? registrationLink(extensionId, browser)
-    : "The registration link appears here after you paste a valid extension ID.";
+  window.location.href = `help.html?browser=${encodeURIComponent(browser)}`;
 }
 
 function registrationLink(extensionId, browser) {
@@ -217,9 +294,14 @@ function selectedBrowser() {
   return browserSelect.value && browsers[browserSelect.value] ? browserSelect.value : "";
 }
 
-function sanitizeExtensionId(value) {
-  const trimmed = value.trim().toLowerCase();
-  return /^[a-p]{32}$/.test(trimmed) ? trimmed : "";
+function currentFolderPath() {
+  if (window.location.protocol !== "file:") {
+    return "Select the extension folder installed with Voice Watch.";
+  }
+
+  return decodeURIComponent(window.location.pathname.replace(/^\/([A-Za-z]:)/, "$1"))
+    .replace(/\/setup\.html$/i, "")
+    .replace(/\//g, "\\");
 }
 
 async function copyText(value) {
