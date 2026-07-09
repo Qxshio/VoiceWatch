@@ -13,6 +13,8 @@ const MAX_POLL_SECONDS: u64 = 300;
 pub struct Settings {
     pub poll_interval_seconds: u64,
     pub only_poll_when_roblox_running: bool,
+    #[serde(default)]
+    pub developer_mode: bool,
     #[serde(default = "default_true")]
     pub pause_polling_while_roblox_uses_microphone: bool,
     pub show_overlay: bool,
@@ -34,6 +36,7 @@ impl Default for Settings {
         Self {
             poll_interval_seconds: 10,
             only_poll_when_roblox_running: true,
+            developer_mode: false,
             pause_polling_while_roblox_uses_microphone: true,
             show_overlay: true,
             play_sound_on_restore: true,
@@ -62,9 +65,17 @@ pub fn load_settings() -> Result<Settings> {
 
     let contents = fs::read_to_string(&path)
         .with_context(|| format!("failed to read settings at {}", path.display()))?;
-    let settings = serde_json::from_str::<Settings>(&contents)
+    let raw_settings = serde_json::from_str::<serde_json::Value>(&contents)
+        .with_context(|| format!("failed to parse settings at {}", path.display()))?;
+    let needs_default_fields = settings_needs_default_fields(&raw_settings);
+    let settings = serde_json::from_value::<Settings>(raw_settings)
         .with_context(|| format!("failed to parse settings at {}", path.display()))?
         .validate();
+    if needs_default_fields {
+        if let Err(error) = save_settings(&settings) {
+            eprintln!("Failed to update settings defaults: {error:#}");
+        }
+    }
     Ok(settings)
 }
 
@@ -90,4 +101,44 @@ pub fn settings_path() -> Result<PathBuf> {
 
 fn default_true() -> bool {
     true
+}
+
+fn settings_needs_default_fields(value: &serde_json::Value) -> bool {
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+
+    [
+        "developerMode",
+        "pausePollingWhileRobloxUsesMicrophone",
+        "launchOnStartup",
+    ]
+    .iter()
+    .any(|key| !object.contains_key(*key))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn detects_settings_missing_defaulted_fields() {
+        let old_settings = json!({
+            "pollIntervalSeconds": 10,
+            "onlyPollWhenRobloxRunning": true,
+            "showOverlay": true,
+            "playSoundOnRestore": true,
+            "overlayPosition": "top-right"
+        });
+
+        assert!(settings_needs_default_fields(&old_settings));
+    }
+
+    #[test]
+    fn complete_settings_do_not_need_defaulted_fields() {
+        let settings = serde_json::to_value(Settings::default()).unwrap();
+
+        assert!(!settings_needs_default_fields(&settings));
+    }
 }

@@ -115,6 +115,18 @@ impl AppState {
         self.voice_state = VoiceState::ExpiredChecking;
     }
 
+    pub fn mark_test_suspended(&mut self, checked_at_ms: i64, banned_until_ms: i64) {
+        self.last_checked_at_ms = Some(checked_at_ms);
+        self.restored_overlay_shown = false;
+        self.countdown = Some(AnchoredCountdown::new(banned_until_ms));
+        self.voice_state = VoiceState::TempSuspended {
+            checked_at_ms,
+            banned_until_ms,
+            ban_reason: Some(7),
+            denial_reason: Some(6),
+        };
+    }
+
     pub fn apply_voice_status(&mut self, envelope: VoiceStatusEnvelope) {
         self.browser_connected = true;
         self.last_checked_at_ms = Some(envelope.checked_at);

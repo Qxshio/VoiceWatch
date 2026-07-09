@@ -147,6 +147,7 @@ Default settings:
 {
   "pollIntervalSeconds": 10,
   "onlyPollWhenRobloxRunning": true,
+  "developerMode": false,
   "pausePollingWhileRobloxUsesMicrophone": true,
   "showOverlay": true,
   "playSoundOnRestore": true,
@@ -164,6 +165,10 @@ microphone. Voice Watch does not read microphone audio; it only reads Windows'
 local microphone-use metadata for the Roblox executable.
 When Roblox returns a temporary suspension end time, the browser connector waits
 for that local countdown to expire before asking Roblox again.
+
+Set `developerMode` to `true` to show a tray-only **Test Suspend** button. It
+starts a local two-minute test suspension for checking the countdown and HUD,
+then disables while that suspension is active.
 
 ## Load the extension in a Chromium-based browser
 

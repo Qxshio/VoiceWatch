@@ -30,7 +30,11 @@ enum UserEvent {
 struct MenuShape {
     browser_connected: bool,
     has_countdown: bool,
+    developer_mode: bool,
+    can_test_suspend: bool,
 }
+
+const TEST_SUSPENSION_SECONDS: i64 = 120;
 
 pub fn run_tray_app() -> Result<()> {
     let settings = settings::load_settings().context("failed to load settings")?;
@@ -115,6 +119,7 @@ pub fn run_simulated_countdown(seconds: u64) -> Result<()> {
 }
 
 struct TrayApp {
+    settings: settings::Settings,
     state: AppState,
     hud: overlay::SuspensionHud,
     last_server: Option<rejoin::LastServer>,
@@ -127,8 +132,9 @@ struct TrayApp {
 }
 
 impl TrayApp {
-    fn new(_settings: settings::Settings) -> Self {
+    fn new(settings: settings::Settings) -> Self {
         Self {
+            settings,
             state: AppState::default(),
             hud: overlay::SuspensionHud::default(),
             last_server: None,
@@ -163,7 +169,18 @@ impl TrayApp {
         MenuShape {
             browser_connected: self.state.is_browser_connected(),
             has_countdown: self.state.countdown.is_some(),
+            developer_mode: self.settings.developer_mode,
+            can_test_suspend: self.can_test_suspend(),
         }
+    }
+
+    fn can_test_suspend(&self) -> bool {
+        !matches!(
+            self.state.voice_state,
+            VoiceState::TempSuspended { .. }
+                | VoiceState::SuspendedUnknownDuration { .. }
+                | VoiceState::ExpiredChecking
+        )
     }
 
     fn create_menu(&mut self, shape: MenuShape) -> Result<Menu> {
@@ -194,6 +211,13 @@ impl TrayApp {
         if !shape.browser_connected {
             let connect = MenuItem::with_id("connect", "Connect Roblox", true, None);
             menu.append(&connect)?;
+        }
+
+        if shape.developer_mode {
+            menu.append(&PredefinedMenuItem::separator())?;
+            let test_suspend =
+                MenuItem::with_id("test_suspend", "Test Suspend", shape.can_test_suspend, None);
+            menu.append(&test_suspend)?;
         }
 
         menu.append(&settings)?;
@@ -267,6 +291,15 @@ impl TrayApp {
             "connect" => {
                 let _ = open_setup_page(self.state.is_browser_connected());
             }
+            "test_suspend" => {
+                if self.can_test_suspend() {
+                    let now_ms = now_wall_clock_ms();
+                    self.last_server = roblox_logs::detect_last_server_from_logs();
+                    self.state
+                        .mark_test_suspended(now_ms, now_ms + TEST_SUSPENSION_SECONDS * 1000);
+                    self.refresh_tray();
+                }
+            }
             "settings" => {
                 if let Ok(path) = settings::settings_path() {
                     let _ = open::that(path);
@@ -296,6 +329,8 @@ impl TrayApp {
     }
 
     fn handle_tick(&mut self) {
+        self.reload_settings();
+
         if matches!(self.state.voice_state, VoiceState::TempSuspended { .. })
             && self
                 .state
@@ -312,6 +347,12 @@ impl TrayApp {
         }
 
         self.refresh_tray();
+    }
+
+    fn reload_settings(&mut self) {
+        if let Ok(settings) = settings::load_settings() {
+            self.settings = settings;
+        }
     }
 
     fn refresh_hud(&mut self) {
