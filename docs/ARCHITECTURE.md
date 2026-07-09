@@ -75,7 +75,9 @@ native host acknowledgement; the named-pipe implementation is planned next.
 - `monitor.rs` decides when polling should happen.
 - `process.rs` checks for a visible Roblox game window and Windows microphone
   activity metadata for Roblox.
-- `roblox_logs.rs` extracts best-effort server information from local logs.
+- `roblox_logs.rs` extracts best-effort server information from local logs,
+  including `GameId`/`gameInstanceId` and private-server access/link codes when
+  Roblox records them.
 - `rejoin.rs` converts last-server metadata into a user-clicked target.
 - `overlay.rs` owns the compact suspension/restored HUD and restore notification
   fallback.

@@ -106,6 +106,14 @@ impl AppState {
     }
 
     pub fn mark_roblox_not_running(&mut self) {
+        if matches!(
+            self.voice_state,
+            VoiceState::TempSuspended { .. }
+                | VoiceState::SuspendedUnknownDuration { .. }
+                | VoiceState::Restored { .. }
+        ) {
+            return;
+        }
         self.voice_state = VoiceState::RobloxNotRunning;
     }
 

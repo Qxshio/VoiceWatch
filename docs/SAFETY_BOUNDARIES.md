@@ -25,5 +25,6 @@ Allowed behavior:
 - Desktop app detects whether `RobloxPlayerBeta.exe` has a visible game window.
 - Desktop app reads Windows microphone-use metadata for the current Roblox
   executable path, only to pause polling while VC is already active.
-- Desktop app reads local Roblox logs for `placeId` and `gameInstanceId` only.
+- Desktop app reads local Roblox logs for best-effort rejoin metadata such as
+  `placeId`, `gameInstanceId`/`GameId`, `accessCode`, or `linkCode`.
 - Desktop app opens a Roblox link after the user clicks a rejoin button.

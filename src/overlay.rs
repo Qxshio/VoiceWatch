@@ -32,11 +32,18 @@ enum HudMode {
     Restored,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HudButton {
+    Hide,
+    Rejoin,
+}
+
 #[derive(Debug, Clone)]
 struct HudState {
     mode: HudMode,
     last_server: Option<LastServer>,
     restored_started_at: Option<Instant>,
+    hidden: bool,
 }
 
 impl Default for HudState {
@@ -47,6 +54,7 @@ impl Default for HudState {
             },
             last_server: None,
             restored_started_at: None,
+            hidden: false,
         }
     }
 }
@@ -58,7 +66,7 @@ pub struct SuspensionHud {
 
 const HUD_CLASS_NAME: &str = "VoiceWatchSuspensionHud";
 const SUSPENDED_WIDTH: i32 = 286;
-const RESTORED_WIDTH: i32 = 326;
+const RESTORED_WIDTH: i32 = 390;
 const HUD_HEIGHT: i32 = 42;
 const HUD_TOP_OFFSET: i32 = 12;
 const RESTORE_ANIMATION_MS: u64 = 850;
@@ -73,11 +81,11 @@ pub fn play_restore_sound() {
 }
 
 pub fn show_restored_overlay(last_server: Option<&LastServer>) -> Result<OverlayAction> {
-    let can_rejoin = last_server.is_some_and(LastServer::is_actionable);
+    let can_rejoin = last_server.is_some_and(LastServer::can_rejoin_exact);
     let description = if can_rejoin {
         "Your VC suspension has expired.\n\nPress OK to rejoin your last known server, or Cancel to dismiss."
     } else {
-        "Your VC suspension has expired.\n\nThe last server could not be identified."
+        "Your VC suspension has expired.\n\nThe exact server could not be identified."
     };
 
     let title = wide("Voice chat restored");
@@ -106,25 +114,43 @@ pub fn show_restored_overlay(last_server: Option<&LastServer>) -> Result<Overlay
 
 impl SuspensionHud {
     pub fn show_suspended(&mut self, remaining: String) {
-        *hud_shared().lock().expect("HUD state mutex poisoned") = HudState {
-            mode: HudMode::Suspended { remaining },
-            last_server: None,
-            restored_started_at: None,
+        let hidden = {
+            let mut state = hud_shared().lock().expect("HUD state mutex poisoned");
+            let hidden = matches!(state.mode, HudMode::Suspended { .. }) && state.hidden;
+            *state = HudState {
+                mode: HudMode::Suspended { remaining },
+                last_server: None,
+                restored_started_at: None,
+                hidden,
+            };
+            hidden
         };
+        if hidden {
+            self.hide();
+            return;
+        }
         self.present_current_state();
     }
 
     pub fn show_restored(&mut self, last_server: Option<LastServer>) {
-        let should_animate = {
+        let (should_animate, hidden) = {
             let mut state = hud_shared().lock().expect("HUD state mutex poisoned");
             let should_animate = !matches!(state.mode, HudMode::Restored);
+            if should_animate {
+                state.hidden = false;
+            }
             state.mode = HudMode::Restored;
             state.last_server = last_server;
             if should_animate || state.restored_started_at.is_none() {
                 state.restored_started_at = Some(Instant::now());
             }
-            should_animate
+            (should_animate, state.hidden)
         };
+
+        if hidden {
+            self.hide();
+            return;
+        }
 
         let hwnd = self.present_current_state();
         if should_animate {
@@ -143,6 +169,15 @@ impl SuspensionHud {
     }
 
     fn present_current_state(&mut self) -> Option<HWND> {
+        if hud_shared()
+            .lock()
+            .expect("HUD state mutex poisoned")
+            .hidden
+        {
+            self.hide();
+            return None;
+        }
+
         let Some(bounds) = process::roblox_window_bounds() else {
             self.hide();
             return None;
@@ -253,16 +288,32 @@ unsafe extern "system" fn hud_window_proc(
         }
         WM_LBUTTONUP => {
             let (x, y) = lparam_point(lparam);
-            if button_rect(hud_size()).is_some_and(|rect| point_in_rect(x, y, rect)) {
-                let server = hud_shared()
-                    .lock()
-                    .expect("HUD state mutex poisoned")
-                    .last_server
-                    .clone();
-                if let Some(server) = server {
+            let action = {
+                let state = hud_shared().lock().expect("HUD state mutex poisoned");
+                button_at_point(&state, x, y)
+            };
+
+            match action {
+                Some(HudButton::Hide) => {
+                    hud_shared()
+                        .lock()
+                        .expect("HUD state mutex poisoned")
+                        .hidden = true;
+                    ShowWindow(hwnd, SW_HIDE);
+                }
+                Some(HudButton::Rejoin) => {
+                    let server = hud_shared()
+                        .lock()
+                        .expect("HUD state mutex poisoned")
+                        .last_server
+                        .clone();
+                    let Some(server) = server else {
+                        return 0;
+                    };
                     let _ = open_rejoin_target(&server);
                     ShowWindow(hwnd, SW_HIDE);
                 }
+                None => {}
             }
             0
         }
@@ -371,12 +422,14 @@ fn paint_suspended(hdc: windows_sys::Win32::Graphics::Gdi::HDC, remaining: Strin
         RECT {
             left: 116,
             top: 0,
-            right: SUSPENDED_WIDTH - 12,
+            right: suspended_hide_button_rect().left - 8,
             bottom: HUD_HEIGHT,
         },
         rgb(232, 235, 239),
         DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS,
     );
+
+    paint_button(hdc, suspended_hide_button_rect(), "Hide", true, false);
 }
 
 fn paint_restored(
@@ -423,47 +476,21 @@ fn paint_restored(
         RECT {
             left: 46,
             top: 0,
-            right: 214,
+            right: restored_hide_button_rect().left - 8,
             bottom: HUD_HEIGHT,
         },
         rgb(232, 235, 239),
         DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
     );
 
-    let Some(rect) = button_rect((RESTORED_WIDTH, HUD_HEIGHT)) else {
-        return;
-    };
-    let can_rejoin = last_server.is_some_and(LastServer::is_actionable);
-    let fill = if can_rejoin {
-        rgb(242, 243, 243)
-    } else {
-        rgb(86, 89, 94)
-    };
-    let text = if can_rejoin { "Rejoin" } else { "No server" };
-    let text_color = if can_rejoin {
-        rgb(35, 37, 39)
-    } else {
-        rgb(190, 196, 202)
-    };
-
-    unsafe {
-        let brush = CreateSolidBrush(fill);
-        let pen = CreatePen(PS_SOLID, 1, rgb(71, 74, 79));
-        let old_brush = SelectObject(hdc, brush as HGDIOBJ);
-        let old_pen = SelectObject(hdc, pen as HGDIOBJ);
-        RoundRect(hdc, rect.left, rect.top, rect.right, rect.bottom, 7, 7);
-        SelectObject(hdc, old_pen);
-        SelectObject(hdc, old_brush);
-        DeleteObject(pen as HGDIOBJ);
-        DeleteObject(brush as HGDIOBJ);
-    }
-
-    draw_text(
+    let can_rejoin = last_server.is_some_and(LastServer::can_rejoin_exact);
+    paint_button(hdc, restored_hide_button_rect(), "Hide", true, false);
+    paint_button(
         hdc,
-        text,
-        rect,
-        text_color,
-        DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
+        restored_rejoin_button_rect(),
+        if can_rejoin { "Rejoin" } else { "No server" },
+        can_rejoin,
+        true,
     );
 
     let sweep_width = ((RESTORED_WIDTH - 20) as f32 * eased).round() as i32;
@@ -504,13 +531,96 @@ fn draw_text(
     }
 }
 
-fn button_rect(size: (i32, i32)) -> Option<RECT> {
-    (size.0 >= RESTORED_WIDTH).then_some(RECT {
-        left: size.0 - 96,
+fn paint_button(
+    hdc: windows_sys::Win32::Graphics::Gdi::HDC,
+    rect: RECT,
+    text: &str,
+    enabled: bool,
+    primary: bool,
+) {
+    let fill = match (enabled, primary) {
+        (true, true) => rgb(242, 243, 243),
+        (true, false) => rgb(56, 59, 64),
+        (false, _) => rgb(86, 89, 94),
+    };
+    let text_color = match (enabled, primary) {
+        (true, true) => rgb(35, 37, 39),
+        (true, false) => rgb(232, 235, 239),
+        (false, _) => rgb(190, 196, 202),
+    };
+
+    unsafe {
+        let brush = CreateSolidBrush(fill);
+        let pen = CreatePen(PS_SOLID, 1, rgb(71, 74, 79));
+        let old_brush = SelectObject(hdc, brush as HGDIOBJ);
+        let old_pen = SelectObject(hdc, pen as HGDIOBJ);
+        RoundRect(hdc, rect.left, rect.top, rect.right, rect.bottom, 7, 7);
+        SelectObject(hdc, old_pen);
+        SelectObject(hdc, old_brush);
+        DeleteObject(pen as HGDIOBJ);
+        DeleteObject(brush as HGDIOBJ);
+    }
+
+    draw_text(
+        hdc,
+        text,
+        rect,
+        text_color,
+        DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
+    );
+}
+
+fn button_at_point(state: &HudState, x: i32, y: i32) -> Option<HudButton> {
+    if point_in_rect(x, y, hide_button_rect(&state.mode)) {
+        return Some(HudButton::Hide);
+    }
+
+    if matches!(state.mode, HudMode::Restored)
+        && state
+            .last_server
+            .as_ref()
+            .is_some_and(LastServer::can_rejoin_exact)
+        && point_in_rect(x, y, restored_rejoin_button_rect())
+    {
+        return Some(HudButton::Rejoin);
+    }
+
+    None
+}
+
+fn hide_button_rect(mode: &HudMode) -> RECT {
+    match mode {
+        HudMode::Suspended { .. } => suspended_hide_button_rect(),
+        HudMode::Restored => restored_hide_button_rect(),
+    }
+}
+
+fn suspended_hide_button_rect() -> RECT {
+    RECT {
+        left: SUSPENDED_WIDTH - 72,
         top: 8,
-        right: size.0 - 12,
-        bottom: size.1 - 8,
-    })
+        right: SUSPENDED_WIDTH - 12,
+        bottom: HUD_HEIGHT - 8,
+    }
+}
+
+fn restored_hide_button_rect() -> RECT {
+    let rejoin = restored_rejoin_button_rect();
+    RECT {
+        left: rejoin.left - 68,
+        top: 8,
+        right: rejoin.left - 8,
+        bottom: HUD_HEIGHT - 8,
+    }
+}
+
+fn restored_rejoin_button_rect() -> RECT {
+    RECT {
+        left: RESTORED_WIDTH - 96,
+        top: 8,
+        right: RESTORED_WIDTH - 12,
+        bottom: HUD_HEIGHT - 8,
+    }
 }
 
 fn point_in_rect(x: i32, y: i32, rect: RECT) -> bool {

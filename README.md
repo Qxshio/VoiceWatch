@@ -41,7 +41,9 @@ Voice Watch combines a local desktop app with a small browser connector:
 This keeps checks focused on the moments where they are useful: while you are in
 a Roblox game, not already using VC, and waiting for a suspension to clear. A
 small HUD attaches near the top of the Roblox window while suspended so you can
-see the remaining time without opening the tray menu.
+see the remaining time without opening the tray menu. The HUD can be hidden for
+the current suspension/restored phase without stopping the tray countdown or the
+restore sound.
 
 ## Privacy model
 
@@ -224,10 +226,13 @@ Rejoining is always user-clicked. Voice Watch never auto-rejoins.
 The app tries to infer the last Roblox place and server ID from local Roblox
 logs. This is best-effort:
 
-- If `placeId` and `gameInstanceId` are available, the rejoin action opens a
-  Roblox deep link.
-- If only `placeId` is available, it opens the Roblox experience page.
-- If neither is available, the button is hidden or disabled in future UI.
+- If `placeId` and an exact join target are available, the rejoin action opens
+  Roblox's game-start link for that server.
+- Public servers use `gameInstanceId`, also logged by Roblox as `GameId`.
+- Private servers can use `accessCode` or `linkCode` when Roblox logs them.
+- If only `placeId` is available, Voice Watch can identify the experience but
+  cannot honestly claim an exact same-server rejoin, so the HUD disables the
+  Rejoin button.
 
 Voice Watch does not inject into Roblox, read process memory, simulate clicks,
 or bypass Roblox behavior.
