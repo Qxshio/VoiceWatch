@@ -5,73 +5,92 @@
   color: #f4f7fb;
 }
 
+* {
+  box-sizing: border-box;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
-  display: grid;
-  place-items: center;
   background: #14161a;
 }
 
 main {
-  width: min(560px, calc(100vw - 32px));
+  width: min(820px, calc(100vw - 32px));
+  margin: 0 auto;
+  padding: 40px 0;
 }
 
 header {
   display: flex;
   gap: 14px;
   align-items: center;
+  margin-bottom: 24px;
 }
 
 .mark {
-  width: 40px;
-  height: 40px;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
   border-radius: 8px;
   background: #2ab878;
   box-shadow: inset 0 0 0 7px rgba(255, 255, 255, 0.12);
 }
 
-h1 {
+h1,
+h2,
+p {
   margin: 0;
-  font-size: 22px;
+}
+
+h1 {
+  font-size: 25px;
+  line-height: 1.2;
+}
+
+h2 {
+  margin-bottom: 7px;
+  font-size: 16px;
+  line-height: 1.3;
 }
 
 p {
-  margin: 4px 0 0;
   color: #aeb7c4;
+  line-height: 1.55;
 }
 
-ol {
-  margin: 24px 0;
-  padding-left: 24px;
-  color: #d8e0e8;
-  line-height: 1.8;
+.step,
+.note {
+  display: grid;
+  grid-template-columns: 38px 1fr;
+  gap: 14px;
+  margin-top: 12px;
+  padding: 16px;
+  border: 1px solid #2a3039;
+  border-radius: 8px;
+  background: #191c21;
 }
 
-label {
-  display: block;
-  margin-bottom: 7px;
-  color: #aeb7c4;
-  font-size: 13px;
+.number {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: #2ab878;
+  color: #07130e;
+  font-weight: 800;
 }
 
-input {
-  width: 100%;
-  box-sizing: border-box;
-  height: 38px;
-  margin-bottom: 14px;
-  padding: 0 12px;
-  border: 1px solid #353b45;
-  border-radius: 7px;
-  background: #0d0f12;
-  color: #f4f7fb;
-  font: 13px "Cascadia Mono", Consolas, monospace;
+.content {
+  min-width: 0;
 }
 
 .actions {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+  margin-top: 12px;
 }
 
 button {
@@ -91,8 +110,32 @@ button + button {
   background: #2b3038;
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+label {
+  display: block;
+  margin: 12px 0 7px;
+  color: #d8e0e8;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+input {
+  width: 100%;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid #353b45;
+  border-radius: 7px;
+  background: #0d0f12;
+  color: #f4f7fb;
+  font: 13px "Cascadia Mono", Consolas, monospace;
+}
+
 pre {
-  margin: 16px 0 0;
+  margin: 12px 0 0;
   padding: 12px;
   overflow: auto;
   border-radius: 7px;
@@ -100,4 +143,35 @@ pre {
   color: #c7d1dc;
   font: 12px/1.45 "Cascadia Mono", Consolas, monospace;
   white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.status {
+  margin-top: 8px;
+  color: #ffcd7a;
+}
+
+.status.valid {
+  color: #75dfa8;
+}
+
+.success {
+  margin-top: 10px;
+  color: #d8e0e8;
+}
+
+.note {
+  display: block;
+  border-color: #3c4450;
+}
+
+@media (max-width: 560px) {
+  main {
+    width: min(100vw - 20px, 820px);
+    padding: 20px 0;
+  }
+
+  .step {
+    grid-template-columns: 1fr;
+  }
 }

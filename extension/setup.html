@@ -11,31 +11,74 @@
       <header>
         <span class="mark" aria-hidden="true"></span>
         <div>
-          <h1>Voice Watch setup</h1>
-          <p>Load the browser connector, then open it from the extensions menu.</p>
+          <h1>Connect Voice Watch</h1>
+          <p>Follow these steps once for the unpacked browser extension.</p>
         </div>
       </header>
 
-      <ol>
-        <li>Open Chrome or Edge extensions.</li>
-        <li>Turn on developer mode.</li>
-        <li>Choose Load unpacked and select this folder.</li>
-        <li>Copy the generated extension ID.</li>
-        <li>Register native messaging with that ID if Connect cannot find the desktop app.</li>
-        <li>Click the Voice Watch extension icon and press Connect.</li>
-      </ol>
-
-      <label for="extension-id">Extension ID</label>
-      <input id="extension-id" type="text" spellcheck="false" placeholder="Paste extension ID">
-
-      <section class="actions" aria-label="Setup actions">
-        <button id="open-folder" type="button">Open folder</button>
-        <button id="copy-path" type="button">Copy path</button>
-        <button id="copy-command" type="button">Copy command</button>
+      <section class="step">
+        <div class="number">1</div>
+        <div class="content">
+          <h2>Open your browser extensions page</h2>
+          <p>Use Chrome or Edge, then turn on Developer mode in the top corner.</p>
+          <div class="actions">
+            <button id="open-chrome" type="button">Open Chrome</button>
+            <button id="open-edge" type="button">Open Edge</button>
+          </div>
+          <pre id="browser-addresses">Chrome: chrome://extensions
+Edge: edge://extensions</pre>
+        </div>
       </section>
 
-      <pre id="path" aria-live="polite"></pre>
-      <pre id="command" aria-live="polite"></pre>
+      <section class="step">
+        <div class="number">2</div>
+        <div class="content">
+          <h2>Load the Voice Watch extension</h2>
+          <p>Click Load unpacked, then select this exact folder.</p>
+          <pre id="path" aria-live="polite"></pre>
+          <div class="actions">
+            <button id="open-folder" type="button">Open folder</button>
+            <button id="copy-path" type="button">Copy folder path</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="step">
+        <div class="number">3</div>
+        <div class="content">
+          <h2>Copy the extension ID</h2>
+          <p>After loading the extension, Chrome or Edge shows an ID on the Voice Watch extension card.</p>
+          <label for="extension-id">Paste extension ID here</label>
+          <input id="extension-id" type="text" spellcheck="false" placeholder="32 letters, a-p only">
+          <p id="id-status" class="status">Waiting for extension ID.</p>
+        </div>
+      </section>
+
+      <section class="step">
+        <div class="number">4</div>
+        <div class="content">
+          <h2>Register the desktop connection</h2>
+          <p>Open PowerShell, paste this command, and press Enter.</p>
+          <pre id="command" aria-live="polite"></pre>
+          <div class="actions">
+            <button id="copy-command" type="button">Copy command</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="step">
+        <div class="number">5</div>
+        <div class="content">
+          <h2>Connect</h2>
+          <p>Open the Voice Watch extension from the browser toolbar and press Connect.</p>
+          <p class="success">Success looks like: the extension says Desktop connected, and the tray menu says Status: Connected.</p>
+        </div>
+      </section>
+
+      <section class="note">
+        <h2>If it still does not connect</h2>
+        <p>Reload the extension, run the registration command again with the current extension ID, then press Connect again.</p>
+      </section>
     </main>
 
     <script src="setup.js"></script>
