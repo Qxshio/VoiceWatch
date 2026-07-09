@@ -1,6 +1,9 @@
 const HOST_NAME = "com.voice_watch.native";
 const PROTOCOL_VERSION = 1;
 const VOICE_SETTINGS_URL = "https://voice.roblox.com/v1/settings";
+const AUTHENTICATED_USER_URL = "https://users.roblox.com/v1/users/authenticated";
+const PRESENCE_URL = "https://presence.roblox.com/v1/presence/users";
+const PRESENCE_REFRESH_MS = 15000;
 
 let nativePort = null;
 let nativeStatus = {
@@ -20,17 +23,24 @@ let connectWaiters = [];
 let pollReadinessWaiters = new Map();
 let pollTimer = null;
 let pollInFlight = false;
+let presenceTimer = null;
 let intentionalDisconnect = false;
 let manuallyDisconnected = false;
+let lastServer = null;
+let currentUserId = null;
+let lastPresenceRefreshAtMs = 0;
 
 const statusHydration = chrome.storage.local
-  .get(["nativeStatus", "lastVoiceStatus", "manuallyDisconnected"])
+  .get(["nativeStatus", "lastVoiceStatus", "manuallyDisconnected", "lastServer"])
   .then((stored) => {
     if (stored.nativeStatus) {
       nativeStatus = { ...nativeStatus, ...stored.nativeStatus, connected: false, connecting: false };
     }
     if (stored.lastVoiceStatus) {
       lastVoiceStatus = stored.lastVoiceStatus;
+    }
+    if (stored.lastServer) {
+      lastServer = stored.lastServer;
     }
     manuallyDisconnected = Boolean(stored.manuallyDisconnected);
   });
@@ -75,12 +85,16 @@ async function handleRuntimeMessage(message) {
       const connection = manuallyDisconnected
         ? { ok: false, nativeStatus }
         : await connectNative();
+      refreshCurrentPresence(false).catch(() => {});
       return {
         ok: connection.ok,
         nativeStatus,
-        lastVoiceStatus
+        lastVoiceStatus,
+        lastServer
       };
     }
+    case "remember_last_server":
+      return rememberLastServer(message.server);
     default:
       return {
         ok: false,
@@ -96,7 +110,7 @@ async function ensureStatusHydrated() {
 }
 
 function persistStatus() {
-  return chrome.storage.local.set({ nativeStatus, lastVoiceStatus, manuallyDisconnected });
+  return chrome.storage.local.set({ nativeStatus, lastVoiceStatus, manuallyDisconnected, lastServer });
 }
 
 function connectNative() {
@@ -129,6 +143,7 @@ function connectNative() {
   nativePort.onMessage.addListener(handleNativeMessage);
   nativePort.onDisconnect.addListener(() => {
     stopPolling();
+    stopPresenceRefresh();
     resolvePollReadinessWaiters({
       shouldPoll: false,
       reason: "desktop_disconnected",
@@ -201,6 +216,7 @@ function waitForConnection() {
 
 function disconnectNative() {
   stopPolling();
+  stopPresenceRefresh();
 
   if (nativePort) {
     intentionalDisconnect = true;
@@ -254,6 +270,10 @@ function handleNativeMessage(message) {
     };
     persistStatus();
     resolveConnectWaiters({ ok: true, nativeStatus });
+    if (lastServer) {
+      postNative({ type: "last_server", server: lastServer });
+    }
+    startPresenceRefresh(true);
     startPolling(true);
     return;
   }
@@ -285,6 +305,23 @@ function stopPolling() {
   if (pollTimer) {
     clearTimeout(pollTimer);
     pollTimer = null;
+  }
+}
+
+function startPresenceRefresh(immediate) {
+  stopPresenceRefresh();
+  if (immediate) {
+    refreshCurrentPresence(true).catch(() => {});
+  }
+  presenceTimer = setInterval(() => {
+    refreshCurrentPresence(false).catch(() => {});
+  }, PRESENCE_REFRESH_MS);
+}
+
+function stopPresenceRefresh() {
+  if (presenceTimer) {
+    clearInterval(presenceTimer);
+    presenceTimer = null;
   }
 }
 
@@ -418,7 +455,158 @@ function suspensionPauseDelayMs() {
 async function rememberVoiceStatus(envelope) {
   lastVoiceStatus = envelope;
   await persistStatus();
+  if (envelope?.ok && envelope.data?.isBanned) {
+    refreshCurrentPresence(true).catch(() => {});
+  }
   return envelope;
+}
+
+async function rememberLastServer(server) {
+  const normalized = normalizeServer(server);
+  if (!normalized) {
+    return { ok: false, error: "Server metadata was incomplete.", nativeStatus, lastVoiceStatus, lastServer };
+  }
+
+  if (!lastServer || normalized.detectedAtMs >= (Number(lastServer.detectedAtMs) || 0)) {
+    lastServer = normalized;
+  }
+  await persistStatus();
+  postNative({ type: "last_server", server: lastServer });
+  return { ok: true, nativeStatus, lastVoiceStatus, lastServer };
+}
+
+async function refreshCurrentPresence(force) {
+  if (!nativeStatus.connected && !force) {
+    return { ok: false, skipped: true };
+  }
+
+  const now = Date.now();
+  if (!force && now - lastPresenceRefreshAtMs < PRESENCE_REFRESH_MS) {
+    return { ok: true, skipped: true, lastServer };
+  }
+  lastPresenceRefreshAtMs = now;
+
+  const userId = await authenticatedUserId();
+  if (!userId) {
+    return { ok: false, error: "Roblox user is not signed in." };
+  }
+
+  const response = await fetchPresence(userId);
+  if (!response.ok) {
+    return { ok: false, error: `Roblox presence returned HTTP ${response.status}.` };
+  }
+
+  const body = await response.json();
+  const presence = Array.isArray(body?.userPresences) ? body.userPresences[0] : null;
+  const server = serverFromPresence(presence);
+  if (!server) {
+    return { ok: false, error: "Roblox presence did not include a joinable game." };
+  }
+
+  return rememberLastServer(server);
+}
+
+async function fetchPresence(userId) {
+  let response = await fetchPresenceWithHeaders(userId, {});
+  const csrfToken = response.status === 403 ? response.headers.get("x-csrf-token") : null;
+  if (csrfToken) {
+    response = await fetchPresenceWithHeaders(userId, { "X-CSRF-TOKEN": csrfToken });
+  }
+  return response;
+}
+
+function fetchPresenceWithHeaders(userId, extraHeaders) {
+  return fetch(PRESENCE_URL, {
+    method: "POST",
+    credentials: "include",
+    cache: "no-store",
+    headers: {
+      "Accept": "application/json",
+      "Content-Type": "application/json",
+      ...extraHeaders
+    },
+    body: JSON.stringify({ userIds: [userId] })
+  });
+}
+
+async function authenticatedUserId() {
+  if (currentUserId) {
+    return currentUserId;
+  }
+
+  const response = await fetch(AUTHENTICATED_USER_URL, {
+    credentials: "include",
+    cache: "no-store",
+    headers: {
+      "Accept": "application/json"
+    }
+  });
+  if (response.status === 401 || response.status === 403) {
+    return null;
+  }
+  if (!response.ok) {
+    return null;
+  }
+
+  const body = await response.json();
+  const id = optionalInteger(body?.id);
+  if (id) {
+    currentUserId = id;
+  }
+  return currentUserId;
+}
+
+function serverFromPresence(presence) {
+  const placeId = optionalInteger(presence?.placeId) || optionalInteger(presence?.rootPlaceId);
+  const gameInstanceId = cleanGameInstanceId(presence?.gameId);
+  if (!placeId || !gameInstanceId) {
+    return null;
+  }
+
+  return {
+    placeId,
+    gameInstanceId,
+    detectedAtMs: Date.now()
+  };
+}
+
+function normalizeServer(server) {
+  const placeId = optionalInteger(server?.placeId);
+  const gameInstanceId = cleanGameInstanceId(server?.gameInstanceId);
+  const accessCode = cleanString(server?.accessCode);
+  const linkCode = cleanString(server?.linkCode);
+  if (!placeId || (!gameInstanceId && !accessCode && !linkCode)) {
+    return null;
+  }
+
+  return {
+    placeId,
+    gameInstanceId,
+    accessCode,
+    linkCode,
+    detectedAtMs: optionalInteger(server?.detectedAtMs) || Date.now()
+  };
+}
+
+function optionalInteger(value) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.trunc(number) : null;
+}
+
+function cleanGameInstanceId(value) {
+  const cleaned = cleanString(value);
+  return cleaned && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleaned)
+    ? cleaned
+    : null;
+}
+
+function cleanString(value) {
+  const cleaned = String(value || "").trim();
+  return cleaned.length > 0 ? cleaned : null;
 }
 
 function postNative(message) {

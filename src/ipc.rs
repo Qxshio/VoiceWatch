@@ -1,5 +1,6 @@
 use crate::countdown::now_wall_clock_ms;
 use crate::messages::VoiceStatusEnvelope;
+use crate::rejoin::LastServer;
 use crate::settings;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -19,6 +20,10 @@ pub enum IpcEvent {
     },
     ExtensionDisconnected {
         disconnected_at_ms: i64,
+    },
+    LastServer {
+        server: LastServer,
+        detected_at_ms: i64,
     },
 }
 
@@ -57,6 +62,23 @@ pub fn publish_voice_status(envelope: VoiceStatusEnvelope) -> Result<()> {
         envelope,
         received_at_ms: now_wall_clock_ms(),
     })
+}
+
+pub fn publish_last_server(mut server: LastServer) -> Result<()> {
+    if server.detected_at_ms <= 0 {
+        server.detected_at_ms = now_wall_clock_ms();
+    }
+    write_last_server(&server)?;
+    publish_event(&IpcEvent::LastServer {
+        detected_at_ms: server.detected_at_ms,
+        server,
+    })
+}
+
+pub fn read_last_server() -> Option<LastServer> {
+    let path = last_server_path().ok()?;
+    let contents = fs::read_to_string(path).ok()?;
+    serde_json::from_str(&contents).ok()
 }
 
 pub fn event_log_len() -> u64 {
@@ -124,12 +146,26 @@ fn write_connection_state(state: &ExtensionConnectionState) -> Result<()> {
     fs::write(&path, contents).with_context(|| format!("failed to write {}", path.display()))
 }
 
+fn write_last_server(server: &LastServer) -> Result<()> {
+    let path = last_server_path()?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let contents = serde_json::to_string_pretty(server)?;
+    fs::write(&path, contents).with_context(|| format!("failed to write {}", path.display()))
+}
+
 fn event_log_path() -> Result<PathBuf> {
     Ok(app_data_dir()?.join("ipc-events.jsonl"))
 }
 
 fn connection_state_path() -> Result<PathBuf> {
     Ok(app_data_dir()?.join("extension-state.json"))
+}
+
+fn last_server_path() -> Result<PathBuf> {
+    Ok(app_data_dir()?.join("last-server.json"))
 }
 
 fn app_data_dir() -> Result<PathBuf> {

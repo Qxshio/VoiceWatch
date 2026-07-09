@@ -84,6 +84,10 @@ pub fn run_native_host() -> Result<()> {
                     },
                 )?;
             }
+            ExtensionMessage::LastServer { server } => {
+                let accepted = ipc::publish_last_server(server).is_ok();
+                write_json(&mut writer, &AppMessage::LastServerAck { accepted })?;
+            }
             ExtensionMessage::VoiceStatus(envelope) => {
                 let request_id = envelope.request_id.clone();
                 let accepted = ipc::publish_voice_status(envelope).is_ok();

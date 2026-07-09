@@ -3,7 +3,7 @@ use crate::rejoin::{open_rejoin_target, LastServer};
 use anyhow::Result;
 use std::sync::{Mutex, Once, OnceLock};
 use std::time::{Duration, Instant};
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{
     BeginPaint, CreatePen, CreateSolidBrush, DeleteObject, DrawTextW, EndPaint, GetStockObject,
     InvalidateRect, LineTo, MoveToEx, RoundRect, SelectObject, SetBkMode, SetTextColor,
@@ -12,13 +12,12 @@ use windows_sys::Win32::Graphics::Gdi::{
 };
 use windows_sys::Win32::System::Diagnostics::Debug::MessageBeep;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows_sys::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, GetClientRect, GetCursorPos, GetWindowRect,
-    LoadCursorW, MessageBoxW, RegisterClassW, SetLayeredWindowAttributes, SetWindowPos, ShowWindow,
-    CS_DROPSHADOW, CS_HREDRAW, CS_VREDRAW, HWND_TOPMOST, IDC_ARROW, IDOK, LWA_ALPHA,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, GetClientRect, GetWindowRect, LoadCursorW,
+    MessageBoxW, RegisterClassW, SetLayeredWindowAttributes, SetWindowPos, ShowWindow,
+    CS_DROPSHADOW, CS_HREDRAW, CS_VREDRAW, HTCAPTION, HWND_TOPMOST, IDC_ARROW, IDOK, LWA_ALPHA,
     MB_ICONINFORMATION, MB_OK, MB_OKCANCEL, SWP_NOACTIVATE, SWP_SHOWWINDOW, SW_HIDE, SW_SHOWNA,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT, WNDCLASSW, WS_EX_LAYERED,
+    WM_LBUTTONUP, WM_NCHITTEST, WM_PAINT, WM_WINDOWPOSCHANGED, WNDCLASSW, WS_EX_LAYERED,
     WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
@@ -40,14 +39,6 @@ enum HudButton {
     Rejoin,
 }
 
-#[derive(Debug, Clone, Copy)]
-struct HudDrag {
-    cursor_start_x: i32,
-    cursor_start_y: i32,
-    window_start_x: i32,
-    window_start_y: i32,
-}
-
 #[derive(Debug, Clone)]
 struct HudState {
     mode: HudMode,
@@ -55,7 +46,6 @@ struct HudState {
     restored_started_at: Option<Instant>,
     hidden: bool,
     manual_offset: Option<(i32, i32)>,
-    drag: Option<HudDrag>,
 }
 
 impl Default for HudState {
@@ -68,7 +58,6 @@ impl Default for HudState {
             restored_started_at: None,
             hidden: false,
             manual_offset: None,
-            drag: None,
         }
     }
 }
@@ -138,7 +127,6 @@ impl SuspensionHud {
                 restored_started_at: None,
                 hidden,
                 manual_offset,
-                drag: None,
             };
             hidden
         };
@@ -155,7 +143,6 @@ impl SuspensionHud {
             let should_animate = !matches!(state.mode, HudMode::Restored);
             if should_animate {
                 state.hidden = false;
-                state.drag = None;
             }
             state.mode = HudMode::Restored;
             state.last_server = last_server;
@@ -310,42 +297,19 @@ unsafe extern "system" fn hud_window_proc(
             paint_hud(hwnd);
             0
         }
-        WM_LBUTTONDOWN => {
-            let (x, y) = lparam_point(lparam);
-            if point_in_rect(x, y, drag_handle_rect()) {
-                if let (Some(cursor), Some(window)) = (cursor_pos(), window_rect(hwnd)) {
-                    hud_shared().lock().expect("HUD state mutex poisoned").drag = Some(HudDrag {
-                        cursor_start_x: cursor.x,
-                        cursor_start_y: cursor.y,
-                        window_start_x: window.left,
-                        window_start_y: window.top,
-                    });
-                    SetCapture(hwnd);
-                    return 0;
+        WM_NCHITTEST => {
+            if let Some((x, y)) = screen_lparam_to_client(hwnd, lparam) {
+                if point_in_rect(x, y, drag_handle_rect()) {
+                    return HTCAPTION as LRESULT;
                 }
             }
             DefWindowProcW(hwnd, message, wparam, lparam)
         }
-        WM_MOUSEMOVE => {
-            let drag = hud_shared().lock().expect("HUD state mutex poisoned").drag;
-            if let (Some(drag), Some(cursor)) = (drag, cursor_pos()) {
-                move_dragged_hud(hwnd, drag, cursor);
-                return 0;
-            }
+        WM_WINDOWPOSCHANGED => {
+            remember_manual_offset(hwnd);
             DefWindowProcW(hwnd, message, wparam, lparam)
         }
         WM_LBUTTONUP => {
-            let was_dragging = hud_shared()
-                .lock()
-                .expect("HUD state mutex poisoned")
-                .drag
-                .take()
-                .is_some();
-            if was_dragging {
-                ReleaseCapture();
-                return 0;
-            }
-
             let (x, y) = lparam_point(lparam);
             let action = {
                 let state = hud_shared().lock().expect("HUD state mutex poisoned");
@@ -722,49 +686,33 @@ fn lparam_point(lparam: LPARAM) -> (i32, i32) {
     (x, y)
 }
 
-fn cursor_pos() -> Option<POINT> {
-    let mut point = POINT::default();
-    (unsafe { GetCursorPos(&mut point) } != 0).then_some(point)
-}
-
 fn window_rect(hwnd: HWND) -> Option<RECT> {
     let mut rect = RECT::default();
     (unsafe { GetWindowRect(hwnd, &mut rect) } != 0).then_some(rect)
 }
 
-fn move_dragged_hud(hwnd: HWND, drag: HudDrag, cursor: POINT) {
-    let next_x = drag
-        .window_start_x
-        .saturating_add(cursor.x.saturating_sub(drag.cursor_start_x));
-    let next_y = drag
-        .window_start_y
-        .saturating_add(cursor.y.saturating_sub(drag.cursor_start_y));
-    let size = hud_size();
+fn screen_lparam_to_client(hwnd: HWND, lparam: LPARAM) -> Option<(i32, i32)> {
+    let (screen_x, screen_y) = lparam_point(lparam);
+    let rect = window_rect(hwnd)?;
+    Some((
+        screen_x.saturating_sub(rect.left),
+        screen_y.saturating_sub(rect.top),
+    ))
+}
 
-    unsafe {
-        SetWindowPos(
-            hwnd,
-            HWND_TOPMOST,
-            next_x,
-            next_y,
-            size.0,
-            size.1,
-            SWP_NOACTIVATE | SWP_SHOWWINDOW,
-        );
-        InvalidateRect(hwnd, std::ptr::null(), 1);
-    }
-
-    if let Some(bounds) = process::roblox_window_bounds() {
-        let (default_x, default_y) = default_hud_position(bounds, size);
-        let manual_offset = (
-            next_x.saturating_sub(default_x),
-            next_y.saturating_sub(default_y),
-        );
-        hud_shared()
-            .lock()
-            .expect("HUD state mutex poisoned")
-            .manual_offset = Some(manual_offset);
-    }
+fn remember_manual_offset(hwnd: HWND) {
+    let (Some(window), Some(bounds)) = (window_rect(hwnd), process::roblox_window_bounds()) else {
+        return;
+    };
+    let (default_x, default_y) = default_hud_position(bounds, hud_size());
+    let manual_offset = (
+        window.left.saturating_sub(default_x),
+        window.top.saturating_sub(default_y),
+    );
+    hud_shared()
+        .lock()
+        .expect("HUD state mutex poisoned")
+        .manual_offset = Some(manual_offset);
 }
 
 fn default_hud_position(bounds: process::WindowBounds, size: (i32, i32)) -> (i32, i32) {

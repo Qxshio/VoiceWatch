@@ -4,7 +4,12 @@
   "description": "Connects Roblox voice chat status to the local Voice Watch desktop app.",
   "version": "0.1.0",
   "permissions": ["nativeMessaging", "storage"],
-  "host_permissions": ["https://voice.roblox.com/*", "https://www.roblox.com/*"],
+  "host_permissions": [
+    "https://voice.roblox.com/*",
+    "https://www.roblox.com/*",
+    "https://users.roblox.com/*",
+    "https://presence.roblox.com/*"
+  ],
   "background": {
     "service_worker": "service_worker.js",
     "type": "module"

@@ -1,3 +1,4 @@
+use crate::rejoin::LastServer;
 use serde::{Deserialize, Serialize};
 
 pub const PROTOCOL_VERSION: u32 = 1;
@@ -15,6 +16,9 @@ pub enum ExtensionMessage {
     PollReadinessRequest {
         #[serde(rename = "requestId")]
         request_id: String,
+    },
+    LastServer {
+        server: LastServer,
     },
     Disconnect,
     VoiceStatus(VoiceStatusEnvelope),
@@ -52,6 +56,9 @@ pub enum AppMessage {
     StatusAck {
         #[serde(rename = "requestId")]
         request_id: Option<String>,
+        accepted: bool,
+    },
+    LastServerAck {
         accepted: bool,
     },
     Error {

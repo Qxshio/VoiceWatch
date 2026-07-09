@@ -126,7 +126,7 @@ impl TrayApp {
             settings,
             state: AppState::default(),
             hud: overlay::SuspensionHud::default(),
-            last_server: None,
+            last_server: ipc::read_last_server(),
             setup_opened_on_startup: false,
             tray_icon: None,
             status_item: None,
@@ -281,7 +281,9 @@ impl TrayApp {
             "test_suspend" => {
                 if self.can_test_suspend() {
                     let now_ms = now_wall_clock_ms();
-                    self.last_server = roblox_logs::detect_last_server_from_logs();
+                    if let Some(server) = roblox_logs::detect_last_server_from_logs() {
+                        self.remember_last_server(server);
+                    }
                     self.state
                         .mark_test_suspended(now_ms, now_ms + TEST_SUSPENSION_SECONDS * 1000);
                     self.refresh_tray();
@@ -303,6 +305,9 @@ impl TrayApp {
             }
             IpcEvent::ExtensionDisconnected { .. } => {
                 self.state.mark_disconnected();
+            }
+            IpcEvent::LastServer { server, .. } => {
+                self.remember_last_server(server);
             }
             IpcEvent::VoiceStatus { envelope, .. } => {
                 let was_restored = matches!(self.state.voice_state, VoiceState::Restored { .. });
@@ -345,7 +350,7 @@ impl TrayApp {
 
     fn announce_restored(&mut self) {
         if let Some(server) = roblox_logs::detect_last_server_from_logs() {
-            self.last_server = Some(server);
+            self.remember_last_server(server);
         }
 
         if self.state.restored_overlay_shown {
@@ -356,6 +361,18 @@ impl TrayApp {
             overlay::play_restore_sound();
         }
         self.state.restored_overlay_shown = true;
+    }
+
+    fn remember_last_server(&mut self, server: rejoin::LastServer) {
+        let should_replace = match &self.last_server {
+            Some(current) if current.can_rejoin_exact() && !server.can_rejoin_exact() => false,
+            Some(current) => server.detected_at_ms >= current.detected_at_ms,
+            None => true,
+        };
+
+        if should_replace {
+            self.last_server = Some(server);
+        }
     }
 
     fn refresh_hud(&mut self) {
