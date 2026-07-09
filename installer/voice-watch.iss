@@ -60,6 +60,27 @@ Root: HKCU; Subkey: "Software\Classes\voice-watch"; ValueType: string; ValueName
 Root: HKCU; Subkey: "Software\Classes\voice-watch\shell\open\command"; ValueType: string; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "{#MyAppName}"; ValueData: """{app}\{#MyAppExeName}"""; Flags: uninsdeletevalue
 
+[Code]
+procedure StopRunningVoiceWatch();
+var
+  ResultCode: Integer;
+begin
+  Exec(
+    ExpandConstant('{cmd}'),
+    '/C taskkill /IM voice-watch.exe /F /T >NUL 2>NUL',
+    '',
+    SW_HIDE,
+    ewWaitUntilTerminated,
+    ResultCode
+  );
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  StopRunningVoiceWatch();
+  Result := '';
+end;
+
 #if ExtensionId != ""
 [UninstallRun]
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\unregister-native-host.ps1"" -Browser All -RemoveManifest"; Flags: runhidden

@@ -2,9 +2,10 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde::Deserialize;
 use std::fs;
 use std::io;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use windows_sys::Win32::Foundation::CloseHandle;
 use windows_sys::Win32::System::Threading::{
     OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE,
@@ -76,18 +77,30 @@ pub fn check_for_update() -> Result<Option<UpdateInfo>> {
 }
 
 pub fn download_and_launch_update(info: &UpdateInfo) -> Result<()> {
-    let installer_path = download_installer(info)?;
-    launch_update_helper(&installer_path)
+    append_update_log(&format!("Starting update to {}", info.version));
+    match download_and_launch_update_inner(info) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            append_update_log(&format!("Update launch failed: {error:#}"));
+            Err(error)
+        }
+    }
 }
 
 pub fn run_update_helper_from_args(args: Vec<String>) -> Result<()> {
     match run_update_helper_from_args_inner(args) {
         Ok(()) => Ok(()),
         Err(error) => {
+            append_update_log(&format!("Update helper failed: {error:#}"));
             show_update_error(&format!("{error:#}"));
             Err(error)
         }
     }
+}
+
+fn download_and_launch_update_inner(info: &UpdateInfo) -> Result<()> {
+    let installer_path = download_installer(info)?;
+    launch_update_helper(&installer_path)
 }
 
 fn run_update_helper_from_args_inner(args: Vec<String>) -> Result<()> {
@@ -100,12 +113,15 @@ fn run_update_helper_from_args_inner(args: Vec<String>) -> Result<()> {
     let restart_exe = read_option_path(&mut args, "--restart-exe")?;
 
     if let Some(pid) = wait_pid {
+        append_update_log(&format!("Waiting for Voice Watch process {pid} to exit"));
         wait_for_process_exit(pid, Duration::from_secs(60));
     }
 
+    append_update_log(&format!("Running installer {}", installer_path.display()));
     run_installer(&installer_path)?;
 
     if let Some(restart_exe) = restart_exe {
+        append_update_log(&format!("Restarting {}", restart_exe.display()));
         Command::new(&restart_exe)
             .spawn()
             .with_context(|| format!("failed to reopen {}", restart_exe.display()))?;
@@ -163,6 +179,7 @@ fn download_installer(info: &UpdateInfo) -> Result<PathBuf> {
         .with_context(|| format!("failed to create {}", update_dir.display()))?;
 
     let installer_path = update_dir.join(&info.installer_name);
+    append_update_log(&format!("Downloading {}", info.installer_url));
     let response = ureq::get(&info.installer_url)
         .set("User-Agent", USER_AGENT)
         .timeout(Duration::from_secs(120))
@@ -178,6 +195,11 @@ fn download_installer(info: &UpdateInfo) -> Result<PathBuf> {
         bail!("downloaded installer was empty");
     }
 
+    append_update_log(&format!(
+        "Downloaded {} bytes to {}",
+        bytes,
+        installer_path.display()
+    ));
     Ok(installer_path)
 }
 
@@ -187,7 +209,7 @@ fn launch_update_helper(installer_path: &Path) -> Result<()> {
     fs::create_dir_all(&helper_dir)
         .with_context(|| format!("failed to create {}", helper_dir.display()))?;
 
-    let helper_path = helper_dir.join(UPDATE_HELPER_EXE);
+    let helper_path = helper_dir.join(format!("{}-{UPDATE_HELPER_EXE}", std::process::id()));
     fs::copy(&current_exe, &helper_path).with_context(|| {
         format!(
             "failed to copy update helper from {} to {}",
@@ -196,7 +218,7 @@ fn launch_update_helper(installer_path: &Path) -> Result<()> {
         )
     })?;
 
-    Command::new(&helper_path)
+    let child = Command::new(&helper_path)
         .arg("--apply-update")
         .arg(installer_path)
         .arg("--wait-pid")
@@ -206,6 +228,11 @@ fn launch_update_helper(installer_path: &Path) -> Result<()> {
         .spawn()
         .with_context(|| format!("failed to start {}", helper_path.display()))?;
 
+    append_update_log(&format!(
+        "Started helper {} with pid {}",
+        helper_path.display(),
+        child.id()
+    ));
     Ok(())
 }
 
@@ -214,6 +241,8 @@ fn run_installer(installer_path: &Path) -> Result<()> {
         bail!("installer does not exist: {}", installer_path.display());
     }
 
+    let log_path = update_base_dir().join(format!("installer-{}.log", timestamp_ms()));
+    let log_arg = format!("/LOG={}", log_path.display());
     let status = Command::new(installer_path)
         .args([
             "/VERYSILENT",
@@ -222,13 +251,18 @@ fn run_installer(installer_path: &Path) -> Result<()> {
             "/SP-",
             "/CLOSEAPPLICATIONS",
         ])
+        .arg(&log_arg)
         .status()
         .with_context(|| format!("failed to run {}", installer_path.display()))?;
 
     if !status.success() {
-        bail!("installer exited with status {status}");
+        bail!(
+            "installer exited with status {status}. Installer log: {}",
+            log_path.display()
+        );
     }
 
+    append_update_log(&format!("Installer completed successfully: {log_arg}"));
     Ok(())
 }
 
@@ -318,6 +352,27 @@ fn show_update_error(body: &str) {
             MB_OK | MB_ICONERROR,
         );
     }
+}
+
+fn update_base_dir() -> PathBuf {
+    std::env::temp_dir().join("VoiceWatch")
+}
+
+fn append_update_log(message: &str) {
+    let path = update_base_dir().join("update.log");
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(file, "[{}] {message}", timestamp_ms());
+    }
+}
+
+fn timestamp_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or_default()
 }
 
 fn wide(value: &str) -> Vec<u16> {

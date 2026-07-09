@@ -50,7 +50,7 @@ Extension to host:
 ```json
 {
   "type": "hello",
-  "extensionVersion": "0.1.5",
+  "extensionVersion": "0.1.6",
   "protocolVersion": 1
 }
 ```
@@ -60,7 +60,7 @@ Host to extension:
 ```json
 {
   "type": "hello_ack",
-  "appVersion": "0.1.5",
+  "appVersion": "0.1.6",
   "protocolVersion": 1,
   "pollIntervalSeconds": 10
 }

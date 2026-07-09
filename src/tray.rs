@@ -63,6 +63,8 @@ enum TrayIconStyle {
 
 const TEST_SUSPENSION_SECONDS: i64 = 120;
 const UPDATE_CHECK_INITIAL_DELAY: Duration = Duration::from_secs(20);
+const UPDATE_CHECK_RETRY_INTERVAL: Duration = Duration::from_secs(2 * 60);
+const UPDATE_CHECK_FAST_RETRY_LIMIT: u8 = 5;
 const UPDATE_CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 
 pub fn run_tray_app() -> Result<()> {
@@ -99,16 +101,24 @@ pub fn run_tray_app() -> Result<()> {
     let update_proxy = event_loop.create_proxy();
     std::thread::spawn(move || {
         std::thread::sleep(UPDATE_CHECK_INITIAL_DELAY);
+        let mut consecutive_misses = 0;
         loop {
-            match updates::check_for_update() {
+            let found_update = match updates::check_for_update() {
                 Ok(Some(info)) => {
                     let _ =
                         update_proxy.send_event(UserEvent::Update(UpdateEvent::Available(info)));
+                    true
                 }
-                Ok(None) => {}
-                Err(error) => eprintln!("Update check failed: {error:#}"),
-            }
-            std::thread::sleep(UPDATE_CHECK_INTERVAL);
+                Ok(None) => false,
+                Err(error) => {
+                    eprintln!("Update check failed: {error:#}");
+                    false
+                }
+            };
+            std::thread::sleep(next_update_check_delay(
+                found_update,
+                &mut consecutive_misses,
+            ));
         }
     });
 
@@ -459,14 +469,20 @@ impl TrayApp {
 
         let proxy = self.proxy.clone();
         std::thread::spawn(move || {
-            let event = match updates::download_and_launch_update(&info) {
-                Ok(()) => UpdateEvent::InstallLaunched,
-                Err(error) => UpdateEvent::InstallFailed {
-                    info,
-                    message: error.to_string(),
-                },
+            match updates::download_and_launch_update(&info) {
+                Ok(()) => {
+                    let _ = proxy.send_event(UserEvent::Update(UpdateEvent::InstallLaunched));
+                    std::thread::sleep(Duration::from_millis(250));
+                    std::process::exit(0);
+                }
+                Err(error) => {
+                    let event = UpdateEvent::InstallFailed {
+                        info,
+                        message: error.to_string(),
+                    };
+                    let _ = proxy.send_event(UserEvent::Update(event));
+                }
             };
-            let _ = proxy.send_event(UserEvent::Update(event));
         });
     }
 
@@ -666,6 +682,20 @@ fn plural(value: i64, unit: &str) -> String {
     }
 }
 
+fn next_update_check_delay(found_update: bool, consecutive_misses: &mut u8) -> Duration {
+    if found_update {
+        *consecutive_misses = 0;
+        return UPDATE_CHECK_INTERVAL;
+    }
+
+    if *consecutive_misses < UPDATE_CHECK_FAST_RETRY_LIMIT {
+        *consecutive_misses += 1;
+        UPDATE_CHECK_RETRY_INTERVAL
+    } else {
+        UPDATE_CHECK_INTERVAL
+    }
+}
+
 impl UpdateTrayState {
     fn menu_shape(&self) -> UpdateMenuShape {
         match self {
@@ -790,6 +820,29 @@ mod tests {
         assert!(!should_ignore_voice_status_for_test_suspend(
             None, &restored, 10_000
         ));
+    }
+
+    #[test]
+    fn update_checks_retry_quickly_before_returning_to_normal_cadence() {
+        let mut misses = 0;
+        for expected_misses in 1..=UPDATE_CHECK_FAST_RETRY_LIMIT {
+            assert_eq!(
+                next_update_check_delay(false, &mut misses),
+                UPDATE_CHECK_RETRY_INTERVAL
+            );
+            assert_eq!(misses, expected_misses);
+        }
+
+        assert_eq!(
+            next_update_check_delay(false, &mut misses),
+            UPDATE_CHECK_INTERVAL
+        );
+
+        assert_eq!(
+            next_update_check_delay(true, &mut misses),
+            UPDATE_CHECK_INTERVAL
+        );
+        assert_eq!(misses, 0);
     }
 
     fn voice_status(is_banned: bool) -> VoiceStatusEnvelope {
