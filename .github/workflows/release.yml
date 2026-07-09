@@ -70,11 +70,14 @@ jobs:
       - name: Build installer
         shell: pwsh
         run: |
-          $args = @("-SkipRustBuild", "-IsccPath", "${{ steps.inno.outputs.iscc_path }}")
-          if ("${{ vars.VOICE_WATCH_EXTENSION_ID }}") {
-            $args += @("-ExtensionId", "${{ vars.VOICE_WATCH_EXTENSION_ID }}")
+          $installerArgs = @{
+            SkipRustBuild = $true
+            IsccPath = "${{ steps.inno.outputs.iscc_path }}"
           }
-          .\scripts\build-installer.ps1 @args
+          if ("${{ vars.VOICE_WATCH_EXTENSION_ID }}") {
+            $installerArgs.ExtensionId = "${{ vars.VOICE_WATCH_EXTENSION_ID }}"
+          }
+          .\scripts\build-installer.ps1 @installerArgs
 
       - name: Package extension
         shell: pwsh
