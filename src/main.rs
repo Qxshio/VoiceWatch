@@ -1,6 +1,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod app_state;
+mod browser_support;
 mod countdown;
 mod ipc;
 mod messages;
@@ -64,6 +65,12 @@ fn is_browser_native_host_invocation(args: &[String]) -> bool {
 }
 
 fn handle_protocol_url(url: &str) -> Result<()> {
+    if url.starts_with("voice-watch://open-extensions") {
+        let browser = browser_support::browser_from_protocol_url(url)?;
+        browser_support::open_extensions_page(browser)?;
+        return Ok(());
+    }
+
     match native_host_registration::register_from_protocol_url(url) {
         Ok(summary) => {
             show_message(

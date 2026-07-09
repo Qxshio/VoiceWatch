@@ -1,4 +1,5 @@
 use crate::app_state::{AppState, VoiceState};
+use crate::browser_support;
 use crate::countdown::{format_remaining, now_wall_clock_ms};
 use crate::ipc::{self, IpcEvent};
 use crate::messages::VoiceStatusData;
@@ -21,6 +22,13 @@ use winit::window::WindowId;
 enum UserEvent {
     Menu(MenuEvent),
     Ipc(IpcEvent),
+    Tick,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MenuShape {
+    browser_connected: bool,
+    has_countdown: bool,
 }
 
 pub fn run_tray_app() -> Result<()> {
@@ -46,6 +54,12 @@ pub fn run_tray_app() -> Result<()> {
                 let _ = ipc_proxy.send_event(UserEvent::Ipc(event));
             }
         }
+    });
+
+    let tick_proxy = event_loop.create_proxy();
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_secs(1));
+        let _ = tick_proxy.send_event(UserEvent::Tick);
     });
 
     let mut app = TrayApp::new(settings);
@@ -105,6 +119,7 @@ struct TrayApp {
     status_item: Option<MenuItem>,
     countdown_item: Option<MenuItem>,
     last_checked_item: Option<MenuItem>,
+    menu_shape: Option<MenuShape>,
 }
 
 impl TrayApp {
@@ -115,38 +130,13 @@ impl TrayApp {
             status_item: None,
             countdown_item: None,
             last_checked_item: None,
+            menu_shape: None,
         }
     }
 
     fn build_tray(&mut self) -> Result<()> {
-        let menu = Menu::new();
-
-        let title = MenuItem::with_id("title", "Voice Watch", false, None);
-        let status = MenuItem::with_id("status", "Status: Disconnected", false, None);
-        let countdown = MenuItem::with_id("countdown", "Countdown: --", false, None);
-        let last_checked = MenuItem::with_id("last_checked", "Last checked: --", false, None);
-        let check_now = MenuItem::with_id("check_now", "Check now", true, None);
-        let connect = MenuItem::with_id("connect", "Connect Roblox", true, None);
-        let settings = MenuItem::with_id("settings", "Settings", true, None);
-        let quit = MenuItem::with_id("quit", "Quit", true, None);
-
-        menu.append_items(&[
-            &title,
-            &PredefinedMenuItem::separator(),
-            &status,
-            &countdown,
-            &last_checked,
-            &PredefinedMenuItem::separator(),
-            &check_now,
-            &connect,
-            &settings,
-            &PredefinedMenuItem::separator(),
-            &quit,
-        ])?;
-
-        self.status_item = Some(status);
-        self.countdown_item = Some(countdown);
-        self.last_checked_item = Some(last_checked);
+        let shape = self.desired_menu_shape();
+        let menu = self.create_menu(shape)?;
 
         self.tray_icon = Some(
             TrayIconBuilder::new()
@@ -155,9 +145,76 @@ impl TrayApp {
                 .with_menu(Box::new(menu))
                 .build()?,
         );
+        self.menu_shape = Some(shape);
 
         self.refresh_menu_labels();
         Ok(())
+    }
+
+    fn desired_menu_shape(&self) -> MenuShape {
+        MenuShape {
+            browser_connected: self.state.is_browser_connected(),
+            has_countdown: self.state.countdown.is_some(),
+        }
+    }
+
+    fn create_menu(&mut self, shape: MenuShape) -> Result<Menu> {
+        let menu = Menu::new();
+
+        let title = MenuItem::with_id("title", "Voice Watch", false, None);
+        let status = MenuItem::with_id("status", "Status: Disconnected", false, None);
+        let last_checked = MenuItem::with_id("last_checked", "Last checked: --", false, None);
+        let check_now = MenuItem::with_id("check_now", "Check now", true, None);
+        let settings = MenuItem::with_id("settings", "Settings", true, None);
+        let quit = MenuItem::with_id("quit", "Quit", true, None);
+
+        menu.append(&title)?;
+        menu.append(&PredefinedMenuItem::separator())?;
+        menu.append(&status)?;
+
+        self.countdown_item = None;
+        if shape.has_countdown {
+            let countdown = MenuItem::with_id("countdown", "Countdown: --", false, None);
+            menu.append(&countdown)?;
+            self.countdown_item = Some(countdown);
+        }
+
+        menu.append(&last_checked)?;
+        menu.append(&PredefinedMenuItem::separator())?;
+        menu.append(&check_now)?;
+
+        if !shape.browser_connected {
+            let connect = MenuItem::with_id("connect", "Connect Roblox", true, None);
+            menu.append(&connect)?;
+        }
+
+        menu.append(&settings)?;
+        menu.append(&PredefinedMenuItem::separator())?;
+        menu.append(&quit)?;
+
+        self.status_item = Some(status);
+        self.last_checked_item = Some(last_checked);
+
+        Ok(menu)
+    }
+
+    fn refresh_tray(&mut self) {
+        let desired_shape = self.desired_menu_shape();
+        if self.menu_shape != Some(desired_shape) {
+            match self.create_menu(desired_shape) {
+                Ok(menu) => {
+                    if let Some(tray_icon) = &self.tray_icon {
+                        tray_icon.set_menu(Some(Box::new(menu)));
+                        self.menu_shape = Some(desired_shape);
+                    }
+                }
+                Err(error) => {
+                    eprintln!("Failed to update tray menu: {error:#}");
+                }
+            }
+        }
+
+        self.refresh_menu_labels();
     }
 
     fn refresh_menu_labels(&self) {
@@ -176,10 +233,11 @@ impl TrayApp {
         }
 
         if let Some(item) = &self.last_checked_item {
+            let now_ms = now_wall_clock_ms();
             let text = self
                 .state
                 .last_checked_at_ms
-                .map(|value| value.to_string())
+                .map(|value| format_relative_time(value, now_ms))
                 .unwrap_or_else(|| "--".into());
             item.set_text(format!("Last checked: {text}"));
         }
@@ -195,12 +253,10 @@ impl TrayApp {
                 } else {
                     self.state.mark_roblox_not_running();
                 }
-                self.refresh_menu_labels();
+                self.refresh_tray();
             }
             "connect" => {
-                if let Ok(path) = extension_setup_page() {
-                    let _ = open::that(path);
-                }
+                let _ = open_setup_page(self.state.is_browser_connected());
             }
             "settings" => {
                 if let Ok(path) = settings::settings_path() {
@@ -223,7 +279,7 @@ impl TrayApp {
                 self.state.apply_voice_status(envelope);
             }
         }
-        self.refresh_menu_labels();
+        self.refresh_tray();
     }
 }
 
@@ -240,6 +296,7 @@ impl ApplicationHandler<UserEvent> for TrayApp {
         match event {
             UserEvent::Menu(menu_event) => self.handle_menu(event_loop, menu_event),
             UserEvent::Ipc(ipc_event) => self.handle_ipc(ipc_event),
+            UserEvent::Tick => self.refresh_tray(),
         }
     }
 
@@ -250,6 +307,13 @@ impl ApplicationHandler<UserEvent> for TrayApp {
         _event: WindowEvent,
     ) {
     }
+}
+
+fn open_setup_page(is_connected: bool) -> Result<()> {
+    let path = extension_setup_page()?;
+    let query = browser_support::setup_query(is_connected);
+    let url = format!("{}?{query}", file_url(&path));
+    open::that(url).context("failed to open browser connector setup")
 }
 
 fn extension_setup_page() -> Result<std::path::PathBuf> {
@@ -265,6 +329,46 @@ fn extension_setup_page() -> Result<std::path::PathBuf> {
     Ok(std::env::current_dir()?
         .join("extension")
         .join("setup.html"))
+}
+
+fn file_url(path: &std::path::Path) -> String {
+    let path = path.to_string_lossy().replace('\\', "/");
+    let path = if path.starts_with('/') {
+        path
+    } else {
+        format!("/{path}")
+    };
+    format!("file://{}", encode_file_url_path(&path))
+}
+
+fn encode_file_url_path(path: &str) -> String {
+    path.bytes()
+        .flat_map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'/' | b':' | b'-' | b'_' | b'.' | b'~' => {
+                vec![byte as char]
+            }
+            _ => format!("%{byte:02X}").chars().collect(),
+        })
+        .collect()
+}
+
+fn format_relative_time(checked_at_ms: i64, now_ms: i64) -> String {
+    let elapsed_seconds = now_ms.saturating_sub(checked_at_ms).max(0) / 1000;
+    match elapsed_seconds {
+        0..=4 => "just now".into(),
+        5..=59 => plural(elapsed_seconds, "second"),
+        60..=3599 => plural(elapsed_seconds / 60, "minute"),
+        3600..=86399 => plural(elapsed_seconds / 3600, "hour"),
+        _ => plural(elapsed_seconds / 86400, "day"),
+    }
+}
+
+fn plural(value: i64, unit: &str) -> String {
+    if value == 1 {
+        format!("1 {unit} ago")
+    } else {
+        format!("{value} {unit}s ago")
+    }
 }
 
 fn make_icon() -> Result<Icon> {
@@ -285,4 +389,28 @@ fn make_icon() -> Result<Icon> {
     }
 
     Icon::from_rgba(rgba, SIZE, SIZE).context("failed to create tray icon")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn relative_time_is_human_readable() {
+        assert_eq!(format_relative_time(10_000, 12_000), "just now");
+        assert_eq!(format_relative_time(10_000, 20_000), "10 seconds ago");
+        assert_eq!(format_relative_time(10_000, 70_000), "1 minute ago");
+        assert_eq!(format_relative_time(10_000, 130_000), "2 minutes ago");
+        assert_eq!(format_relative_time(10_000, 3_610_000), "1 hour ago");
+    }
+
+    #[test]
+    fn file_urls_escape_spaces() {
+        assert_eq!(
+            file_url(std::path::Path::new(
+                r"C:\Program Files\Voice Watch\setup.html"
+            )),
+            "file:///C:/Program%20Files/Voice%20Watch/setup.html"
+        );
+    }
 }

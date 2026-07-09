@@ -16,77 +16,93 @@
         </div>
       </header>
 
-      <section class="step">
-        <div class="number">1</div>
-        <div class="content">
-          <h2>Open your extensions page</h2>
-          <p>Use any supported Chromium-based browser. Turn on Developer mode, then choose Load unpacked.</p>
-          <div class="actions">
-            <button id="open-browser" type="button">Open extensions page</button>
-            <button id="browser-help" type="button">Help me find it</button>
+      <section id="success-page" class="success-page" hidden>
+        <div class="success-mark" aria-hidden="true"></div>
+        <h2 id="success-title">Voice Watch is connected</h2>
+        <p id="success-copy">The desktop app and browser connector are ready.</p>
+        <ol>
+          <li>Open the Voice Watch icon in your browser toolbar.</li>
+          <li>Keep Roblox logged in in this browser.</li>
+          <li>Voice Watch will update the tray status automatically.</li>
+        </ol>
+        <div class="actions">
+          <button id="back-to-setup" type="button">Back to setup</button>
+        </div>
+      </section>
+
+      <section id="unsupported-page" class="note" hidden>
+        <h2>No supported browser found</h2>
+        <p>Voice Watch needs Chrome, Edge, Brave, Vivaldi, Opera, or Chromium for the browser connector. Install one of those browsers, then open this setup page again.</p>
+      </section>
+
+      <div id="setup-flow">
+        <section class="step">
+          <div class="number">1</div>
+          <div class="content">
+            <h2>Open your extensions page</h2>
+            <p>Voice Watch found your supported browser options. Turn on Developer mode, then choose Load unpacked.</p>
+            <div id="browser-actions" class="actions">
+              <button id="open-browser" type="button">Open extensions page</button>
+              <button id="browser-help" type="button">Help me find it</button>
+            </div>
+            <div id="browser-field">
+              <label for="browser">Browser</label>
+              <select id="browser"></select>
+              <p id="browser-status" class="status">Detecting browser.</p>
+            </div>
           </div>
-          <label for="browser">Browser</label>
-          <select id="browser">
-            <option value="all">Not sure / register all supported browsers</option>
-            <option value="chrome">Google Chrome</option>
-            <option value="edge">Microsoft Edge</option>
-            <option value="brave">Brave</option>
-            <option value="vivaldi">Vivaldi</option>
-            <option value="opera">Opera</option>
-            <option value="chromium">Chromium</option>
-          </select>
-        </div>
-      </section>
+        </section>
 
-      <section class="step">
-        <div class="number">2</div>
-        <div class="content">
-          <h2>Select this extension folder</h2>
-          <p>When the browser asks for a folder, select the folder below.</p>
-          <pre id="path" aria-live="polite"></pre>
-          <div class="actions">
-            <button id="open-folder" type="button">Open folder</button>
-            <button id="copy-path" type="button">Copy folder path</button>
+        <section class="step">
+          <div class="number">2</div>
+          <div class="content">
+            <h2>Select this extension folder</h2>
+            <p>When the browser asks for a folder, select the folder below.</p>
+            <pre id="path" aria-live="polite"></pre>
+            <div class="actions">
+              <button id="open-folder" type="button">Open folder</button>
+              <button id="copy-path" type="button">Copy folder path</button>
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      <section class="step">
-        <div class="number">3</div>
-        <div class="content">
-          <h2>Paste the extension ID</h2>
-          <p>The browser shows this ID on the Voice Watch extension card after you load it.</p>
-          <label for="extension-id">Extension ID</label>
-          <input id="extension-id" type="text" spellcheck="false" placeholder="32 letters, a-p only">
-          <p id="id-status" class="status">Waiting for extension ID.</p>
-        </div>
-      </section>
-
-      <section class="step">
-        <div class="number">4</div>
-        <div class="content">
-          <h2>Register desktop connection</h2>
-          <p>Click the button below. Windows may ask to open Voice Watch. Choose Open.</p>
-          <div class="actions">
-            <button id="register" type="button" disabled>Register with Voice Watch</button>
+        <section class="step">
+          <div class="number">3</div>
+          <div class="content">
+            <h2>Paste the extension ID</h2>
+            <p>The browser shows this ID on the Voice Watch extension card after you load it.</p>
+            <label for="extension-id">Extension ID</label>
+            <input id="extension-id" type="text" spellcheck="false" placeholder="32 letters, a-p only">
+            <p id="id-status" class="status">Waiting for extension ID.</p>
           </div>
-          <pre id="register-link" aria-live="polite"></pre>
-        </div>
-      </section>
+        </section>
 
-      <section class="step">
-        <div class="number">5</div>
-        <div class="content">
-          <h2>Open Voice Watch</h2>
-          <p>Open the Voice Watch icon in your browser toolbar. If it still shows the old status, close and reopen your browser once.</p>
-          <p class="success">Success looks like: Desktop connected in the popup, and Status: Connected in the Voice Watch tray menu.</p>
-        </div>
-      </section>
+        <section class="step">
+          <div class="number">4</div>
+          <div class="content">
+            <h2>Register desktop connection</h2>
+            <p>Click the button below. Windows may ask to open Voice Watch. Choose Open.</p>
+            <div class="actions">
+              <button id="register" type="button" disabled>Register with Voice Watch</button>
+            </div>
+            <pre id="register-link" aria-live="polite"></pre>
+          </div>
+        </section>
 
-      <section class="note">
-        <h2>Supported browsers</h2>
-        <p>Voice Watch currently supports Chromium-based browsers that allow unpacked extensions and native messaging, including Chrome, Edge, Brave, Vivaldi, Opera, and Chromium. Firefox support will need a separate extension package.</p>
-      </section>
+        <section class="step">
+          <div class="number">5</div>
+          <div class="content">
+            <h2>Open Voice Watch</h2>
+            <p>Open the Voice Watch icon in your browser toolbar. If it still shows the old status, close and reopen your browser once.</p>
+            <p class="success">Success looks like: Desktop connected in the popup, and Status: Connected in the Voice Watch tray menu.</p>
+          </div>
+        </section>
+
+        <section class="note">
+          <h2>Supported browsers</h2>
+          <p>Voice Watch currently supports Chromium-based browsers that allow unpacked extensions and native messaging, including Chrome, Edge, Brave, Vivaldi, Opera, and Chromium. Firefox support will need a separate extension package.</p>
+        </section>
+      </div>
     </main>
 
     <script src="setup.js"></script>

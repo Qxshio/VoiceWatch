@@ -67,6 +67,7 @@ impl VoiceState {
 #[derive(Debug, Clone)]
 pub struct AppState {
     pub voice_state: VoiceState,
+    pub browser_connected: bool,
     pub countdown: Option<AnchoredCountdown>,
     pub last_checked_at_ms: Option<i64>,
     pub restored_overlay_shown: bool,
@@ -76,6 +77,7 @@ impl Default for AppState {
     fn default() -> Self {
         Self {
             voice_state: VoiceState::Disconnected,
+            browser_connected: false,
             countdown: None,
             last_checked_at_ms: None,
             restored_overlay_shown: false,
@@ -85,14 +87,20 @@ impl Default for AppState {
 
 impl AppState {
     pub fn mark_connected(&mut self) {
+        self.browser_connected = true;
         if matches!(self.voice_state, VoiceState::Disconnected) {
             self.voice_state = VoiceState::Connected;
         }
     }
 
     pub fn mark_disconnected(&mut self) {
+        self.browser_connected = false;
         self.voice_state = VoiceState::Disconnected;
         self.countdown = None;
+    }
+
+    pub fn is_browser_connected(&self) -> bool {
+        self.browser_connected
     }
 
     pub fn mark_checking(&mut self) {
@@ -108,6 +116,7 @@ impl AppState {
     }
 
     pub fn apply_voice_status(&mut self, envelope: VoiceStatusEnvelope) {
+        self.browser_connected = true;
         self.last_checked_at_ms = Some(envelope.checked_at);
 
         if !envelope.ok {
@@ -151,6 +160,7 @@ impl AppState {
     }
 
     pub fn apply_voice_status_data(&mut self, checked_at_ms: i64, data: VoiceStatusData) {
+        self.browser_connected = true;
         self.last_checked_at_ms = Some(checked_at_ms);
 
         if data.is_banned {
