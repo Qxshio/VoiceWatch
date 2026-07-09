@@ -48,8 +48,7 @@ function Register-BrowserHost {
     param([string] $RegistryPath)
 
     New-Item -Path $RegistryPath -Force | Out-Null
-    $key = Get-Item -Path $RegistryPath
-    $key.SetValue("", $manifestPath)
+    Set-Item -Path $RegistryPath -Value $manifestPath
 }
 
 if ($Browser -in @("Chrome", "Both")) {
