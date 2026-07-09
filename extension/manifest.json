@@ -21,6 +21,12 @@
       "run_at": "document_start"
     }
   ],
+  "web_accessible_resources": [
+    {
+      "resources": ["rejoin_page.js"],
+      "matches": ["https://www.roblox.com/*"]
+    }
+  ],
   "action": {
     "default_title": "Voice Watch",
     "default_popup": "connect.html"

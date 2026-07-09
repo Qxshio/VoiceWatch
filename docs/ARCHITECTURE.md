@@ -78,8 +78,8 @@ native host acknowledgement; the named-pipe implementation is planned next.
 - `roblox_logs.rs` extracts best-effort server information from local logs,
   including `GameId`/`gameInstanceId` and private-server access/link codes when
   Roblox records them.
-- `rejoin.rs` converts last-server metadata into a user-clicked Roblox page
-  target that the extension can launch from browser context.
+- `rejoin.rs` converts last-server metadata into a user-clicked Roblox
+  `roblox://` deep link, with the browser page launcher kept as a fallback.
 - `overlay.rs` owns the compact suspension/restored HUD and restore notification
   fallback.
 - `tray.rs` owns desktop tray runtime wiring.

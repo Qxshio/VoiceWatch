@@ -45,13 +45,43 @@ pub fn rejoin_target_url(server: &LastServer) -> Option<String> {
     ))
 }
 
+pub fn roblox_deep_link_url(server: &LastServer) -> Option<String> {
+    let place_id = server.place_id?;
+
+    let mut params = vec![format!("placeId={place_id}")];
+    if let Some(game_instance_id) = valid_game_instance_id(server.game_instance_id.as_deref()) {
+        params.push(format!("gameInstanceId={}", url_escape(game_instance_id)));
+    }
+    if let Some(access_code) = non_empty(server.access_code.as_deref()) {
+        params.push(format!("accessCode={}", url_escape(access_code)));
+    }
+    if let Some(link_code) = non_empty(server.link_code.as_deref()) {
+        params.push(format!("linkCode={}", url_escape(link_code)));
+    }
+
+    Some(format!("roblox://{}", params.join("&")))
+}
+
 pub fn open_rejoin_target(server: &LastServer) -> Result<()> {
     if !server.can_rejoin_exact() {
         return Err(anyhow!("exact last server is unavailable"));
     }
 
-    let url = rejoin_target_url(server).ok_or_else(|| anyhow!("last server is unavailable"))?;
-    open::that(&url).with_context(|| format!("failed to open rejoin target: {url}"))?;
+    let direct_url =
+        roblox_deep_link_url(server).ok_or_else(|| anyhow!("last server is unavailable"))?;
+    match open::that(&direct_url) {
+        Ok(()) => return Ok(()),
+        Err(direct_error) => {
+            let fallback_url =
+                rejoin_target_url(server).ok_or_else(|| anyhow!("last server is unavailable"))?;
+            open::that(&fallback_url).with_context(|| {
+                format!(
+                    "failed to open Roblox app link {direct_url} and browser fallback {fallback_url}; app link error: {direct_error:#}"
+                )
+            })?;
+        }
+    }
+
     Ok(())
 }
 
@@ -129,6 +159,10 @@ mod tests {
             rejoin_target_url(&server).unwrap(),
             "https://www.roblox.com/games/123/Voice-Watch?voiceWatchRejoin=1&placeId=123&gameInstanceId=1bb8dd1d-ad4c-43d2-a9c6-63feee836e43"
         );
+        assert_eq!(
+            roblox_deep_link_url(&server).unwrap(),
+            "roblox://placeId=123&gameInstanceId=1bb8dd1d-ad4c-43d2-a9c6-63feee836e43"
+        );
     }
 
     #[test]
@@ -146,6 +180,10 @@ mod tests {
             rejoin_target_url(&server).unwrap(),
             "https://www.roblox.com/games/123/Voice-Watch?voiceWatchRejoin=1&placeId=123"
         );
+        assert_eq!(
+            roblox_deep_link_url(&server).unwrap(),
+            "roblox://placeId=123"
+        );
     }
 
     #[test]
@@ -161,6 +199,10 @@ mod tests {
         assert_eq!(
             rejoin_target_url(&server).unwrap(),
             "https://www.roblox.com/games/123/Voice-Watch?voiceWatchRejoin=1&placeId=123&gameInstanceId=1bb8dd1d-ad4c-43d2-a9c6-63feee836e43&accessCode=private%20code"
+        );
+        assert_eq!(
+            roblox_deep_link_url(&server).unwrap(),
+            "roblox://placeId=123&gameInstanceId=1bb8dd1d-ad4c-43d2-a9c6-63feee836e43&accessCode=private%20code"
         );
     }
 }

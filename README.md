@@ -227,18 +227,19 @@ Rejoining is always user-clicked. Voice Watch never auto-rejoins.
 The app tries to infer the last Roblox place and server ID from local Roblox
 logs. This is best-effort:
 
-- If `placeId` and an exact join target are available, the rejoin action opens a
-  Roblox game page with a Voice Watch marker. The browser extension then calls
-  Roblox's page launcher for that server.
+- If `placeId` and an exact join target are available, the rejoin action opens
+  Roblox's registered `roblox://` deep link directly.
 - Public servers use `gameInstanceId`, also logged by Roblox as `GameId`.
 - Private servers can use `accessCode` or `linkCode` when Roblox logs them.
+- The browser extension can also detect the logged-in user's current Roblox
+  presence and pass the current `placeId`/`gameInstanceId` to the desktop app.
 - If only `placeId` is available, Voice Watch can identify the experience but
   cannot honestly claim an exact same-server rejoin, so the HUD disables the
   Rejoin button.
 
 Voice Watch does not inject into the Roblox client, read process memory,
-simulate clicks, or bypass Roblox behavior. The browser helper runs only on the
-Roblox game page opened by the user-clicked Rejoin button.
+simulate clicks, or bypass Roblox behavior. The browser helper only observes
+Roblox web launch metadata and maintains a fallback page launcher.
 
 ## Project layout
 

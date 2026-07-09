@@ -11,10 +11,14 @@ app.
 
 ## Rejoin helper
 
-When the desktop app opens a Roblox game page with `voiceWatchRejoin=1` in the
-URL, `rejoin.js` runs on that page and asks Roblox's own page launcher to join
-the last known server. It is only triggered by the user-clicked Rejoin action
-and only when the URL carries exact server metadata.
+The extension detects the logged-in user's current Roblox presence and sends
+only sanitized `placeId`/`gameInstanceId` metadata to the desktop app. The
+desktop Rejoin button then opens Roblox directly with a user-clicked
+`roblox://` deep link.
+
+The game-page script also watches Roblox web launch calls and keeps a fallback
+launcher for marked Voice Watch rejoin URLs. It does not read browser cookies or
+send Roblox tokens to the desktop app.
 
 ## How polling works
 
