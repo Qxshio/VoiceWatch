@@ -183,15 +183,21 @@ struct TrayApp {
 
 impl TrayApp {
     fn new(settings: settings::Settings, proxy: EventLoopProxy<UserEvent>) -> Self {
+        let mut state = AppState::default();
+        if ipc::read_extension_connection_state().is_some_and(|state| state.is_connected()) {
+            state.mark_connected();
+        }
+        let setup_opened_on_startup = state.is_browser_connected();
+
         Self {
             proxy,
             settings,
-            state: AppState::default(),
+            state,
             update_state: UpdateTrayState::Idle,
             hud: overlay::SuspensionHud::default(),
             last_server: ipc::read_last_server(),
             test_suspension_until_ms: None,
-            setup_opened_on_startup: false,
+            setup_opened_on_startup,
             tray_icon: None,
             tray_icon_style: None,
             update_item: None,
@@ -602,6 +608,10 @@ impl ApplicationHandler<UserEvent> for TrayApp {
 }
 
 fn open_setup_page(is_connected: bool) -> Result<()> {
+    if is_connected {
+        return Ok(());
+    }
+
     let path = extension_setup_page()?;
     let query = browser_support::setup_query(is_connected);
     let url = format!("{}?{query}", file_url(&path));

@@ -37,6 +37,12 @@ pub struct ExtensionConnectionState {
     pub last_disconnected_at_ms: Option<i64>,
 }
 
+impl ExtensionConnectionState {
+    pub fn is_connected(&self) -> bool {
+        self.last_connected_at_ms > self.last_disconnected_at_ms.unwrap_or_default()
+    }
+}
+
 pub fn publish_extension_connected() -> Result<()> {
     let connected_at_ms = now_wall_clock_ms();
     write_connection_state(&ExtensionConnectionState {
@@ -81,6 +87,10 @@ pub fn read_last_server() -> Option<LastServer> {
     let path = last_server_path().ok()?;
     let contents = fs::read_to_string(path).ok()?;
     serde_json::from_str(&contents).ok()
+}
+
+pub fn read_extension_connection_state() -> Option<ExtensionConnectionState> {
+    read_connection_state().ok()
 }
 
 pub fn event_log_len() -> u64 {
@@ -189,4 +199,29 @@ fn app_data_dir() -> Result<PathBuf> {
         .parent()
         .map(PathBuf::from)
         .context("settings path has no parent directory")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ExtensionConnectionState;
+
+    #[test]
+    fn connection_state_detects_active_connection() {
+        let state = ExtensionConnectionState {
+            last_connected_at_ms: 20,
+            last_disconnected_at_ms: None,
+        };
+
+        assert!(state.is_connected());
+    }
+
+    #[test]
+    fn connection_state_detects_newer_disconnect() {
+        let state = ExtensionConnectionState {
+            last_connected_at_ms: 20,
+            last_disconnected_at_ms: Some(30),
+        };
+
+        assert!(!state.is_connected());
+    }
 }

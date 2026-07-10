@@ -47,11 +47,11 @@ const statusHydration = chrome.storage.local
   });
 
 chrome.runtime.onInstalled.addListener((details) => {
-  ensureStatusHydrated().then(() => {
+  ensureStatusHydrated().then(async () => {
     manuallyDisconnected = false;
-    persistStatus();
-    connectNative();
-    if (details?.reason === "install") {
+    await persistStatus();
+    const connection = await connectNative();
+    if (details?.reason === "install" && !connection.ok) {
       openSetupPage();
     }
   });

@@ -13,6 +13,7 @@ mod rejoin;
 mod roblox_logs;
 mod settings;
 mod settings_window;
+mod single_instance;
 mod tray;
 mod updates;
 
@@ -57,8 +58,21 @@ fn main() -> Result<()> {
         }
         Some(other) if other.starts_with("voice-watch://") => handle_protocol_url(other),
         Some(other) => anyhow::bail!("unknown argument: {other}"),
-        None => tray::run_tray_app(),
+        None => run_normal_app(),
     }
+}
+
+fn run_normal_app() -> Result<()> {
+    let _instance_guard = match single_instance::acquire_tray_instance() {
+        Ok(Some(guard)) => Some(guard),
+        Ok(None) => return Ok(()),
+        Err(error) => {
+            eprintln!("Single-instance guard unavailable: {error:#}");
+            None
+        }
+    };
+
+    tray::run_tray_app()
 }
 
 fn is_browser_native_host_invocation(args: &[String]) -> bool {
