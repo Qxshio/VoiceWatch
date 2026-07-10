@@ -89,6 +89,24 @@ test("a timed-out native port is discarded before retrying", async () => {
   assert.equal((await retry).nativeStatus.connected, true);
 });
 
+test("a desktop manual-check command returns a matching voice status", async () => {
+  const worker = createWorkerHarness({});
+  await connectPort(worker, 0);
+
+  worker.ports[0].emitMessage({
+    type: "check_voice_status",
+    requestId: "manual-check"
+  });
+  await worker.flush();
+
+  const response = worker.ports[0].sentMessages.find(
+    (message) => message.type === "voice_status" && message.requestId === "manual-check"
+  );
+  assert.ok(response, "manual check response was sent to the desktop host");
+  assert.equal(response.ok, false);
+  assert.equal(response.error.kind, "auth_error");
+});
+
 async function connectPort(worker, portIndex) {
   const connecting = worker.sendMessage({ type: "get_status" });
   await worker.flush();

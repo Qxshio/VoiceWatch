@@ -10,6 +10,8 @@ use crate::settings::Settings;
 use anyhow::{anyhow, Context, Result};
 use serde::Serialize;
 use std::io::{self, Read, Write};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::thread;
 use std::time::{Duration, Instant};
 
 const MAX_MESSAGE_BYTES: u32 = 1024 * 1024;
@@ -18,93 +20,160 @@ const SMART_POLLING_MIC_QUIET_SECONDS: u64 = 20;
 pub fn run_native_host() -> Result<()> {
     let mut session = NativeSession::new(settings::load_settings().unwrap_or_default());
     let mut connection = PublishedExtensionConnection::default();
-    let stdin = io::stdin();
     let stdout = io::stdout();
-    let mut reader = stdin.lock();
     let mut writer = stdout.lock();
+    let input = spawn_native_input_reader();
 
-    while let Some(frame) = read_frame(&mut reader)? {
-        let message = serde_json::from_slice::<ExtensionMessage>(&frame)
-            .or_else(|_| decode_voice_status_fallback(&frame))
-            .context("failed to decode extension message")?;
+    loop {
+        match input.recv_timeout(Duration::from_millis(100)) {
+            Ok(NativeInput::Frame(frame)) => {
+                handle_native_frame(&frame, &mut session, &mut connection, &mut writer)?;
+            }
+            Ok(NativeInput::Closed) | Err(RecvTimeoutError::Disconnected) => break,
+            Ok(NativeInput::Failed(error)) => return Err(error),
+            Err(RecvTimeoutError::Timeout) => {}
+        }
 
-        match message {
-            ExtensionMessage::Hello {
-                protocol_version, ..
-            } if protocol_version == PROTOCOL_VERSION => {
-                connection.mark_connected();
-                write_json(
-                    &mut writer,
-                    &AppMessage::HelloAck {
-                        app_version: env!("CARGO_PKG_VERSION").to_string(),
-                        protocol_version: PROTOCOL_VERSION,
-                        poll_interval_seconds: session.settings.poll_interval_seconds,
-                    },
-                )?;
-            }
-            ExtensionMessage::Hello {
-                protocol_version, ..
-            } => {
-                write_json(
-                    &mut writer,
-                    &AppMessage::Error {
-                        message: format!(
-                            "{NATIVE_HOST_NAME} expected protocol {PROTOCOL_VERSION}, got {protocol_version}"
-                        ),
-                    },
-                )?;
-            }
-            ExtensionMessage::PollReadinessRequest { request_id } => {
-                session.reload_settings();
-                let readiness = session.current_poll_readiness(request_id);
-                if readiness.microphone_active && !session.microphone_status_published {
-                    let _ = ipc::publish_voice_status(microphone_restored_envelope(
-                        readiness.request_id.clone(),
-                    ));
-                }
-                session.microphone_status_published = readiness.microphone_active;
+        dispatch_requested_voice_check(&connection, &mut writer)?;
+    }
 
-                write_json(
-                    &mut writer,
-                    &AppMessage::PollReadiness {
-                        request_id: readiness.request_id,
-                        poll_interval_seconds: readiness.poll_interval_seconds,
-                        should_poll: readiness.should_poll,
-                        roblox_running: readiness.roblox_running,
-                        roblox_playing: readiness.roblox_playing,
-                        microphone_active: readiness.microphone_active,
-                        reason: readiness.reason,
-                        message: readiness.message,
-                    },
-                )?;
-            }
-            ExtensionMessage::Disconnect => {
-                connection.mark_disconnected();
-                write_json(
-                    &mut writer,
-                    &AppMessage::StatusAck {
-                        request_id: None,
-                        accepted: true,
-                    },
-                )?;
-            }
-            ExtensionMessage::LastServer { server } => {
-                let accepted = ipc::publish_last_server(server).is_ok();
-                write_json(&mut writer, &AppMessage::LastServerAck { accepted })?;
-            }
-            ExtensionMessage::VoiceStatus(envelope) => {
-                let request_id = envelope.request_id.clone();
-                session.remember_voice_status(&envelope);
-                let accepted = ipc::publish_voice_status(envelope).is_ok();
-                write_json(
-                    &mut writer,
-                    &AppMessage::StatusAck {
-                        request_id: Some(request_id),
-                        accepted,
-                    },
-                )?;
+    Ok(())
+}
+
+enum NativeInput {
+    Frame(Vec<u8>),
+    Closed,
+    Failed(anyhow::Error),
+}
+
+fn spawn_native_input_reader() -> Receiver<NativeInput> {
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let stdin = io::stdin();
+        let mut reader = stdin.lock();
+        loop {
+            let input = match read_frame(&mut reader) {
+                Ok(Some(frame)) => NativeInput::Frame(frame),
+                Ok(None) => NativeInput::Closed,
+                Err(error) => NativeInput::Failed(error),
+            };
+            let finished = matches!(&input, NativeInput::Closed | NativeInput::Failed(_));
+            if sender.send(input).is_err() || finished {
+                break;
             }
         }
+    });
+    receiver
+}
+
+fn handle_native_frame(
+    frame: &[u8],
+    session: &mut NativeSession,
+    connection: &mut PublishedExtensionConnection,
+    writer: &mut impl Write,
+) -> Result<()> {
+    let message = serde_json::from_slice::<ExtensionMessage>(frame)
+        .or_else(|_| decode_voice_status_fallback(frame))
+        .context("failed to decode extension message")?;
+
+    match message {
+        ExtensionMessage::Hello {
+            protocol_version, ..
+        } if protocol_version == PROTOCOL_VERSION => {
+            connection.mark_connected();
+            write_json(
+                writer,
+                &AppMessage::HelloAck {
+                    app_version: env!("CARGO_PKG_VERSION").to_string(),
+                    protocol_version: PROTOCOL_VERSION,
+                    poll_interval_seconds: session.settings.poll_interval_seconds,
+                },
+            )?;
+        }
+        ExtensionMessage::Hello {
+            protocol_version, ..
+        } => {
+            write_json(
+                writer,
+                &AppMessage::Error {
+                    message: format!(
+                        "{NATIVE_HOST_NAME} expected protocol {PROTOCOL_VERSION}, got {protocol_version}"
+                    ),
+                },
+            )?;
+        }
+        ExtensionMessage::PollReadinessRequest { request_id } => {
+            session.reload_settings();
+            let readiness = session.current_poll_readiness(request_id);
+            if readiness.microphone_active && !session.microphone_status_published {
+                let _ = ipc::publish_voice_status(microphone_restored_envelope(
+                    readiness.request_id.clone(),
+                ));
+            }
+            session.microphone_status_published = readiness.microphone_active;
+
+            write_json(
+                writer,
+                &AppMessage::PollReadiness {
+                    request_id: readiness.request_id,
+                    poll_interval_seconds: readiness.poll_interval_seconds,
+                    should_poll: readiness.should_poll,
+                    roblox_running: readiness.roblox_running,
+                    roblox_playing: readiness.roblox_playing,
+                    microphone_active: readiness.microphone_active,
+                    reason: readiness.reason,
+                    message: readiness.message,
+                },
+            )?;
+        }
+        ExtensionMessage::Disconnect => {
+            connection.mark_disconnected();
+            write_json(
+                writer,
+                &AppMessage::StatusAck {
+                    request_id: None,
+                    accepted: true,
+                },
+            )?;
+        }
+        ExtensionMessage::LastServer { server } => {
+            let accepted = ipc::publish_last_server(server).is_ok();
+            write_json(writer, &AppMessage::LastServerAck { accepted })?;
+        }
+        ExtensionMessage::VoiceStatus(envelope) => {
+            let request_id = envelope.request_id.clone();
+            session.remember_voice_status(&envelope);
+            let accepted = ipc::publish_voice_status(envelope).is_ok();
+            write_json(
+                writer,
+                &AppMessage::StatusAck {
+                    request_id: Some(request_id),
+                    accepted,
+                },
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
+fn dispatch_requested_voice_check(
+    connection: &PublishedExtensionConnection,
+    writer: &mut impl Write,
+) -> Result<()> {
+    if !connection.is_connected() {
+        return Ok(());
+    }
+
+    let request_id = match ipc::take_voice_check_request() {
+        Ok(request_id) => request_id,
+        Err(error) => {
+            eprintln!("Failed to read manual voice check request: {error:#}");
+            return Ok(());
+        }
+    };
+    if let Some(request_id) = request_id {
+        write_json(writer, &AppMessage::CheckVoiceStatus { request_id })?;
     }
 
     Ok(())
@@ -116,6 +185,10 @@ struct PublishedExtensionConnection {
 }
 
 impl PublishedExtensionConnection {
+    fn is_connected(&self) -> bool {
+        self.connected
+    }
+
     fn mark_connected(&mut self) {
         if !self.connected {
             let _ = ipc::publish_extension_connected();

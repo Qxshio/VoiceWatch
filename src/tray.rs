@@ -4,7 +4,6 @@ use crate::countdown::{format_remaining, now_wall_clock_ms};
 use crate::ipc::{self, IpcEvent};
 use crate::messages::{VoiceStatusData, VoiceStatusEnvelope};
 use crate::overlay;
-use crate::process;
 use crate::rejoin;
 use crate::roblox_logs;
 use crate::settings;
@@ -33,6 +32,7 @@ enum UserEvent {
 struct MenuShape {
     browser_connected: bool,
     has_countdown: bool,
+    can_rejoin: bool,
     developer_mode: bool,
     can_test_suspend: bool,
     update: UpdateMenuShape,
@@ -230,6 +230,10 @@ impl TrayApp {
         MenuShape {
             browser_connected: self.state.is_browser_connected(),
             has_countdown: self.state.countdown.is_some(),
+            can_rejoin: self
+                .last_server
+                .as_ref()
+                .is_some_and(rejoin::LastServer::can_rejoin_exact),
             developer_mode: self.settings.developer_mode,
             can_test_suspend: self.can_test_suspend(),
             update: self.update_state.menu_shape(),
@@ -249,7 +253,7 @@ impl TrayApp {
         let title = MenuItem::with_id("title", "Voice Watch", false, None);
         let status = MenuItem::with_id("status", "Status: Disconnected", false, None);
         let last_checked = MenuItem::with_id("last_checked", "Last checked: --", false, None);
-        let check_now = MenuItem::with_id("check_now", "Check now", true, None);
+        let check_now = MenuItem::with_id("check_now", "Check now", shape.browser_connected, None);
         let settings = MenuItem::with_id("settings", "Settings", true, None);
         let quit = MenuItem::with_id("quit", "Quit", true, None);
 
@@ -281,6 +285,11 @@ impl TrayApp {
         menu.append(&last_checked)?;
         menu.append(&PredefinedMenuItem::separator())?;
         menu.append(&check_now)?;
+
+        if shape.can_rejoin {
+            let rejoin = MenuItem::with_id("rejoin", "Rejoin", true, None);
+            menu.append(&rejoin)?;
+        }
 
         if !shape.browser_connected {
             let connect = MenuItem::with_id("connect", "Connect Roblox", true, None);
@@ -360,13 +369,26 @@ impl TrayApp {
         match event.id().0.as_str() {
             "quit" => event_loop.exit(),
             "check_now" => {
-                let running = process::is_roblox_running();
-                if running {
-                    self.state.mark_checking();
-                } else {
-                    self.state.mark_roblox_not_running();
+                if self.state.is_browser_connected() {
+                    match ipc::request_voice_check() {
+                        Ok(_) => self.state.mark_checking(),
+                        Err(error) => {
+                            eprintln!("Failed to request a voice status check: {error:#}")
+                        }
+                    }
+                    self.refresh_tray();
                 }
-                self.refresh_tray();
+            }
+            "rejoin" => {
+                if let Some(server) = self
+                    .last_server
+                    .as_ref()
+                    .filter(|server| server.can_rejoin_exact())
+                {
+                    if let Err(error) = rejoin::open_rejoin_target(server) {
+                        eprintln!("Failed to rejoin the last server: {error:#}");
+                    }
+                }
             }
             "connect" => {
                 let _ = open_setup_page(self.state.is_browser_connected());

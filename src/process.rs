@@ -58,10 +58,6 @@ pub fn roblox_presence() -> RobloxPresence {
     }
 }
 
-pub fn is_roblox_running() -> bool {
-    roblox_presence().game_window_visible
-}
-
 pub fn roblox_window_bounds() -> Option<WindowBounds> {
     let processes = roblox_player_processes();
     let process_ids = processes

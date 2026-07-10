@@ -6,9 +6,10 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const MAX_EVENT_LOG_BYTES: u64 = 1_000_000;
+const VOICE_CHECK_REQUEST_MAX_AGE_MS: i64 = 30_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -35,6 +36,13 @@ pub struct ExtensionConnectionState {
     pub last_connected_at_ms: i64,
     #[serde(default)]
     pub last_disconnected_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct VoiceCheckRequest {
+    request_id: String,
+    requested_at_ms: i64,
 }
 
 impl ExtensionConnectionState {
@@ -91,6 +99,20 @@ pub fn read_last_server() -> Option<LastServer> {
 
 pub fn read_extension_connection_state() -> Option<ExtensionConnectionState> {
     read_connection_state().ok()
+}
+
+pub fn request_voice_check() -> Result<String> {
+    let requested_at_ms = now_wall_clock_ms();
+    let request_id = format!("manual-{requested_at_ms}-{}", std::process::id());
+    let path = voice_check_request_path()?;
+    write_voice_check_request(&path, &request_id, requested_at_ms)?;
+    Ok(request_id)
+}
+
+pub fn take_voice_check_request() -> Result<Option<String>> {
+    let path = voice_check_request_path()?;
+    let claim_path = path.with_file_name(format!("check-now-{}.claim", std::process::id()));
+    take_voice_check_request_from(&path, &claim_path, now_wall_clock_ms())
 }
 
 pub fn event_log_len() -> u64 {
@@ -181,6 +203,72 @@ fn write_last_server(server: &LastServer) -> Result<()> {
     fs::write(&path, contents).with_context(|| format!("failed to write {}", path.display()))
 }
 
+fn write_voice_check_request(path: &Path, request_id: &str, requested_at_ms: i64) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let request = VoiceCheckRequest {
+        request_id: request_id.to_string(),
+        requested_at_ms,
+    };
+    let contents = serde_json::to_vec(&request)?;
+    let temp_path = path.with_file_name(format!(
+        "check-now-{}-{requested_at_ms}.tmp",
+        std::process::id()
+    ));
+    fs::write(&temp_path, contents)
+        .with_context(|| format!("failed to write {}", temp_path.display()))?;
+
+    match fs::remove_file(path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            let _ = fs::remove_file(&temp_path);
+            return Err(error).with_context(|| format!("failed to replace {}", path.display()));
+        }
+    }
+    if let Err(error) = fs::rename(&temp_path, path) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(error).with_context(|| format!("failed to publish {}", path.display()));
+    }
+
+    Ok(())
+}
+
+fn take_voice_check_request_from(
+    path: &Path,
+    claim_path: &Path,
+    now_ms: i64,
+) -> Result<Option<String>> {
+    let _ = fs::remove_file(claim_path);
+    match fs::rename(path, claim_path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_error) if !path.exists() => return Ok(None),
+        Err(error) => {
+            return Err(error).with_context(|| format!("failed to claim {}", path.display()))
+        }
+    }
+
+    let result = (|| {
+        let contents = fs::read_to_string(claim_path)
+            .with_context(|| format!("failed to read {}", claim_path.display()))?;
+        let request = serde_json::from_str::<VoiceCheckRequest>(&contents)
+            .with_context(|| format!("failed to parse {}", claim_path.display()))?;
+        let age_ms = now_ms.saturating_sub(request.requested_at_ms);
+        if request.request_id.trim().is_empty()
+            || !(0..=VOICE_CHECK_REQUEST_MAX_AGE_MS).contains(&age_ms)
+        {
+            return Ok(None);
+        }
+
+        Ok(Some(request.request_id))
+    })();
+    let _ = fs::remove_file(claim_path);
+    result
+}
+
 fn event_log_path() -> Result<PathBuf> {
     Ok(app_data_dir()?.join("ipc-events.jsonl"))
 }
@@ -193,6 +281,10 @@ fn last_server_path() -> Result<PathBuf> {
     Ok(app_data_dir()?.join("last-server.json"))
 }
 
+fn voice_check_request_path() -> Result<PathBuf> {
+    Ok(app_data_dir()?.join("check-now.json"))
+}
+
 fn app_data_dir() -> Result<PathBuf> {
     let settings_path = settings::settings_path()?;
     settings_path
@@ -203,7 +295,10 @@ fn app_data_dir() -> Result<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::ExtensionConnectionState;
+    use super::{
+        take_voice_check_request_from, write_voice_check_request, ExtensionConnectionState,
+        VOICE_CHECK_REQUEST_MAX_AGE_MS,
+    };
 
     #[test]
     fn connection_state_detects_active_connection() {
@@ -223,5 +318,40 @@ mod tests {
         };
 
         assert!(!state.is_connected());
+    }
+
+    #[test]
+    fn manual_voice_check_request_is_claimed_once() {
+        let directory = tempfile::tempdir().unwrap();
+        let request_path = directory.path().join("check-now.json");
+        let claim_path = directory.path().join("check-now.claim");
+        write_voice_check_request(&request_path, "manual-test", 1_000).unwrap();
+
+        assert_eq!(
+            take_voice_check_request_from(&request_path, &claim_path, 1_001).unwrap(),
+            Some("manual-test".into())
+        );
+        assert_eq!(
+            take_voice_check_request_from(&request_path, &claim_path, 1_002).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn stale_manual_voice_check_request_is_discarded() {
+        let directory = tempfile::tempdir().unwrap();
+        let request_path = directory.path().join("check-now.json");
+        let claim_path = directory.path().join("check-now.claim");
+        write_voice_check_request(&request_path, "manual-stale", 1_000).unwrap();
+
+        assert_eq!(
+            take_voice_check_request_from(
+                &request_path,
+                &claim_path,
+                1_000 + VOICE_CHECK_REQUEST_MAX_AGE_MS + 1,
+            )
+            .unwrap(),
+            None
+        );
     }
 }

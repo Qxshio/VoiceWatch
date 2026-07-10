@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Voice Watch Connector",
   "description": "Connects Roblox voice chat status to the local Voice Watch desktop app.",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "permissions": ["nativeMessaging", "storage"],
   "host_permissions": [
     "https://voice.roblox.com/*",
