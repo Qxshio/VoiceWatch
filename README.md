@@ -279,6 +279,11 @@ Add-ons, and Firefox AMO. Build them with:
 The script regenerates browser icon PNGs from `assets/logo.svg`, updates
 `extension/icons/`, and writes store upload packages to `dist/`.
 
+For Firefox AMO review, the script also writes
+`dist/voice-watch-connector-firefox-source-<version>.zip`. Upload that archive
+when Mozilla asks for source code, and upload
+`dist/voice-watch-connector-firefox-<version>.zip` as the add-on package.
+
 ## Rejoin last server
 
 Rejoining is always user-clicked. Voice Watch never auto-rejoins.

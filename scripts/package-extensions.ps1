@@ -27,6 +27,7 @@ $iconsDir = Join-Path $extensionDir "icons"
 $stageRoot = Join-Path $repoRoot "target\extension-packages"
 $chromiumStage = Join-Path $stageRoot "chromium"
 $firefoxStage = Join-Path $stageRoot "firefox"
+$firefoxSourceStage = Join-Path $stageRoot "firefox-source"
 
 function New-CleanDirectory {
     param([string] $Path)
@@ -107,6 +108,60 @@ function Copy-ExtensionSource {
         }
 }
 
+function Copy-SourcePackagePath {
+    param(
+        [string] $RelativePath,
+        [string] $DestinationRoot
+    )
+
+    $source = Join-Path $repoRoot $RelativePath
+    if (-not (Test-Path -LiteralPath $source)) {
+        throw "Source package input was not found: $RelativePath"
+    }
+
+    $destination = Join-Path $DestinationRoot $RelativePath
+    $item = Get-Item -LiteralPath $source
+    if ($item.PSIsContainer) {
+        $parent = Split-Path -Parent $destination
+        New-Item -ItemType Directory -Force -Path $parent | Out-Null
+        Copy-Item -LiteralPath $source -Destination $parent -Recurse -Force
+        return
+    }
+
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $destination) | Out-Null
+    Copy-Item -LiteralPath $source -Destination $destination -Force
+}
+
+function Copy-FirefoxSourcePackage {
+    param([string] $Destination)
+
+    New-CleanDirectory $Destination
+    $sourceReadme = Join-Path $repoRoot "AMO_SOURCE_README.md"
+    if (-not (Test-Path -LiteralPath $sourceReadme)) {
+        $sourceReadme = Join-Path $repoRoot "README.md"
+    }
+
+    Copy-Item `
+        -LiteralPath $sourceReadme `
+        -Destination (Join-Path $Destination "README.md") `
+        -Force
+
+    $sourcePackagePaths = @(
+        "Cargo.toml",
+        "LICENSE",
+        "assets",
+        "extension",
+        "scripts\package-extensions.ps1"
+    )
+    if (Test-Path -LiteralPath (Join-Path $repoRoot "AMO_SOURCE_README.md")) {
+        $sourcePackagePaths = @("AMO_SOURCE_README.md") + $sourcePackagePaths
+    }
+
+    foreach ($path in $sourcePackagePaths) {
+        Copy-SourcePackagePath -RelativePath $path -DestinationRoot $Destination
+    }
+}
+
 function Write-FirefoxManifest {
     param([string] $Destination)
 
@@ -173,10 +228,13 @@ Write-FirefoxManifest $firefoxStage
 $chromeZip = Join-Path $OutputDir "voice-watch-connector-chrome-$version.zip"
 $edgeZip = Join-Path $OutputDir "voice-watch-connector-edge-$version.zip"
 $firefoxZip = Join-Path $OutputDir "voice-watch-connector-firefox-$version.zip"
+$firefoxSourceZip = Join-Path $OutputDir "voice-watch-connector-firefox-source-$version.zip"
 
 New-ExtensionZip -SourceDirectory $chromiumStage -DestinationZip $chromeZip
 Copy-Item -LiteralPath $chromeZip -Destination $edgeZip -Force
 New-ExtensionZip -SourceDirectory $firefoxStage -DestinationZip $firefoxZip
+Copy-FirefoxSourcePackage $firefoxSourceStage
+New-ExtensionZip -SourceDirectory $firefoxSourceStage -DestinationZip $firefoxSourceZip
 
 Get-ChildItem -LiteralPath $OutputDir -File |
     Where-Object { $_.Name -like "voice-watch-connector-*.zip" } |

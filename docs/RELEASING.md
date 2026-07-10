@@ -13,6 +13,7 @@ Each public release should include:
 - `voice-watch-connector-chrome-<version>.zip`
 - `voice-watch-connector-edge-<version>.zip`
 - `voice-watch-connector-firefox-<version>.zip`
+- `voice-watch-connector-firefox-source-<version>.zip`
 - `SHA256SUMS.txt`
 
 The installer uses Inno Setup and installs Voice Watch per user under:
@@ -39,6 +40,9 @@ cargo clippy --all-targets -- -D warnings
 .\scripts\package-extensions.ps1
 .\scripts\build-installer.ps1
 ```
+
+The extension packaging script also creates the Mozilla AMO source-review ZIP at
+`dist\voice-watch-connector-firefox-source-<version>.zip`.
 
 If the production browser extension ID is known, compile the installer with
 native messaging registration enabled:
