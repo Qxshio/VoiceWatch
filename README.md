@@ -263,6 +263,22 @@ To remove the native messaging registration:
 .\scripts\unregister-native-host.ps1 -Browser All -RemoveManifest
 ```
 
+## Extension packaging
+
+Regular users do not need to build the browser extension. The installer bundles
+the readable, unpacked `extension/` folder so privacy-minded users can inspect
+the files before loading them manually.
+
+Store ZIPs are maintainer upload artifacts for Chrome Web Store, Microsoft Edge
+Add-ons, and Firefox AMO. Build them with:
+
+```powershell
+.\scripts\package-extensions.ps1
+```
+
+The script regenerates browser icon PNGs from `assets/logo.svg`, updates
+`extension/icons/`, and writes store upload packages to `dist/`.
+
 ## Rejoin last server
 
 Rejoining is always user-clicked. Voice Watch never auto-rejoins.
@@ -301,6 +317,7 @@ src/
   tray.rs              Tray runtime and prototype menu
 
 extension/
+  icons/
   manifest.json
   service_worker.js
   connect.html
@@ -311,7 +328,11 @@ extension/
   setup.html
   help.html
 
+assets/
+  logo.svg
+
 scripts/
+  package-extensions.ps1
   register-native-host.ps1
   unregister-native-host.ps1
 ```

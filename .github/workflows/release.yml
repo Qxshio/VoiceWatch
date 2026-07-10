@@ -41,6 +41,10 @@ jobs:
       - name: Build release executable
         run: cargo build --release
 
+      - name: Package store extensions
+        shell: pwsh
+        run: .\scripts\package-extensions.ps1
+
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
 

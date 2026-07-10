@@ -10,6 +10,9 @@ Each public release should include:
 - `VoiceWatch-<version>-Setup.exe`
 - `voice-watch-windows-x64.exe`
 - `voice-watch-extension-<version>.zip`
+- `voice-watch-connector-chrome-<version>.zip`
+- `voice-watch-connector-edge-<version>.zip`
+- `voice-watch-connector-firefox-<version>.zip`
 - `SHA256SUMS.txt`
 
 The installer uses Inno Setup and installs Voice Watch per user under:
@@ -33,6 +36,7 @@ Then run:
 ```powershell
 cargo test
 cargo clippy --all-targets -- -D warnings
+.\scripts\package-extensions.ps1
 .\scripts\build-installer.ps1
 ```
 
