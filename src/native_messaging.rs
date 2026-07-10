@@ -17,6 +17,7 @@ const SMART_POLLING_MIC_QUIET_SECONDS: u64 = 20;
 
 pub fn run_native_host() -> Result<()> {
     let mut session = NativeSession::new(settings::load_settings().unwrap_or_default());
+    let mut connection = PublishedExtensionConnection::default();
     let stdin = io::stdin();
     let stdout = io::stdout();
     let mut reader = stdin.lock();
@@ -31,7 +32,7 @@ pub fn run_native_host() -> Result<()> {
             ExtensionMessage::Hello {
                 protocol_version, ..
             } if protocol_version == PROTOCOL_VERSION => {
-                let _ = ipc::publish_extension_connected();
+                connection.mark_connected();
                 write_json(
                     &mut writer,
                     &AppMessage::HelloAck {
@@ -78,7 +79,7 @@ pub fn run_native_host() -> Result<()> {
                 )?;
             }
             ExtensionMessage::Disconnect => {
-                let _ = ipc::publish_extension_disconnected();
+                connection.mark_disconnected();
                 write_json(
                     &mut writer,
                     &AppMessage::StatusAck {
@@ -107,6 +108,33 @@ pub fn run_native_host() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[derive(Default)]
+struct PublishedExtensionConnection {
+    connected: bool,
+}
+
+impl PublishedExtensionConnection {
+    fn mark_connected(&mut self) {
+        if !self.connected {
+            let _ = ipc::publish_extension_connected();
+            self.connected = true;
+        }
+    }
+
+    fn mark_disconnected(&mut self) {
+        if self.connected {
+            let _ = ipc::publish_extension_disconnected();
+            self.connected = false;
+        }
+    }
+}
+
+impl Drop for PublishedExtensionConnection {
+    fn drop(&mut self) {
+        self.mark_disconnected();
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

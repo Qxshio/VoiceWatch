@@ -62,6 +62,7 @@ winget install OpenJS.NodeJS.LTS
 5. Optional Mozilla linter check:
 
    ```powershell
+   node --test .\tests\extension_service_worker.test.cjs
    npx.cmd --yes addons-linter@latest .\dist\voice-watch-connector-firefox-<version>.zip
    ```
 

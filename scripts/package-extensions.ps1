@@ -151,6 +151,7 @@ function Copy-FirefoxSourcePackage {
         "LICENSE",
         "assets",
         "extension",
+        "tests",
         "scripts\package-extensions.ps1"
     )
     if (Test-Path -LiteralPath (Join-Path $repoRoot "AMO_SOURCE_README.md")) {

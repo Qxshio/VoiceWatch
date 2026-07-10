@@ -52,6 +52,10 @@ If the finish tab does not open, click the Voice Watch extension icon in the
 browser toolbar and choose **Finish setup**. The extension provides its own ID
 to the desktop app automatically.
 
+After an intentional disconnect, open the same popup and choose **Reconnect
+desktop**. The existing native-host registration is reused, so the extension
+does not need to be removed or installed again.
+
 Manual fallback:
 
 ```powershell

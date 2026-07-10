@@ -37,6 +37,7 @@ jobs:
           node --check extension/rejoin.js
           node --check extension/rejoin_page.js
           node -e "JSON.parse(require('fs').readFileSync('extension/manifest.json','utf8'))"
+          node --test tests/extension_service_worker.test.cjs
 
       - name: Build release executable
         run: cargo build --release

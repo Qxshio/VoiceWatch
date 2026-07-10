@@ -37,6 +37,7 @@ Then run:
 ```powershell
 cargo test
 cargo clippy --all-targets -- -D warnings
+node --test tests/extension_service_worker.test.cjs
 .\scripts\test-update-handoff.ps1
 .\scripts\package-extensions.ps1
 .\scripts\build-installer.ps1

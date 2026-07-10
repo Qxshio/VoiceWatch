@@ -44,9 +44,18 @@ async function refreshStatus() {
 
 async function finishSetup() {
   finishSetupButton.disabled = true;
-  result.textContent = "Opening Voice Watch setup...";
+  result.textContent = "Connecting to Voice Watch...";
 
   try {
+    const response = await chrome.runtime.sendMessage({ type: "connect_native" });
+    if (response?.nativeStatus?.connected) {
+      finishSetupButton.disabled = false;
+      renderStatus(response);
+      result.textContent = "Connected.";
+      return;
+    }
+
+    result.textContent = "Opening Voice Watch setup...";
     window.location.href = registrationLink(chrome.runtime.id, "all");
 
     window.setTimeout(() => {
@@ -89,6 +98,8 @@ function renderStatus(response) {
         : nativeStatus.pollPausedMessage ||
           `Checking about every ${nativeStatus.pollIntervalSeconds ?? 10} seconds.`;
     finishSetupButton.hidden = true;
+    finishSetupButton.disabled = false;
+    finishSetupButton.textContent = "Finish setup";
     disconnectButton.hidden = false;
   } else if (nativeStatus?.connecting) {
     connection.textContent = "Connecting to desktop app...";
@@ -100,7 +111,11 @@ function renderStatus(response) {
     connection.textContent = "Desktop not connected";
     desktopStatus.textContent = "Disconnected";
     desktopDetail.textContent =
-      nativeStatus?.lastError || "Click Finish setup to connect this browser.";
+      nativeStatus?.lastError || "Finish setup to connect this browser.";
+    finishSetupButton.textContent = response?.manuallyDisconnected
+      ? "Reconnect desktop"
+      : "Finish setup";
+    finishSetupButton.disabled = false;
     finishSetupButton.hidden = false;
     disconnectButton.hidden = true;
   }

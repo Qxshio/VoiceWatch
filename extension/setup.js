@@ -111,8 +111,23 @@ async function finishExtensionSetup() {
 
   registrationStarted = true;
   finishSetupButton.disabled = true;
-  finishStatus.textContent = "Opening Voice Watch to finish the desktop connection.";
+  finishStatus.textContent = "Connecting to Voice Watch.";
 
+  try {
+    const response = await chrome.runtime.sendMessage({ type: "connect_native" });
+    if (response?.nativeStatus?.connected) {
+      finishSetupButton.disabled = false;
+      showSuccess(
+        "Voice Watch is connected",
+        "The desktop app and browser connector are ready."
+      );
+      return;
+    }
+  } catch (_error) {
+    // Registration below repairs a missing native host before polling retries.
+  }
+
+  finishStatus.textContent = "Opening Voice Watch to finish the desktop connection.";
   window.location.href = registrationLink(chrome.runtime.id, "all");
 
   window.setTimeout(() => {
@@ -159,6 +174,12 @@ async function refreshExtensionConnection() {
         "The desktop app and browser connector are ready."
       );
       return true;
+    }
+
+    if (response?.manuallyDisconnected && !registrationStarted) {
+      finishSetupButton.textContent = "Reconnect desktop";
+      finishStatus.textContent =
+        "Voice Watch is disconnected. Reconnect when you are ready; reinstalling is not required.";
     }
 
     if (registrationStarted) {

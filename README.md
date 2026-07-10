@@ -256,8 +256,10 @@ PowerShell fallback:
 .\scripts\register-native-host.ps1 -ExtensionId "your-extension-id" -Browser All
 ```
 
-The extension popup is read-only. It shows desktop connection, VC status, and a
-disconnect button only while connected.
+The extension popup is status-focused: it shows desktop connection and VC
+status, offers **Disconnect** while connected, and offers **Reconnect desktop**
+after an intentional disconnect. Reconnecting does not require removing or
+reinstalling the extension.
 
 Do not open `extension/connect.html` directly from the file system. It only works
 inside the installed browser extension.

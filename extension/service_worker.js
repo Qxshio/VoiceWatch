@@ -20,12 +20,12 @@ let nativeStatus = {
   robloxLoggedIn: null
 };
 let lastVoiceStatus = null;
-let connectWaiters = [];
+let connectionAttempt = null;
 let pollReadinessWaiters = new Map();
 let pollTimer = null;
 let pollInFlight = false;
 let presenceTimer = null;
-let intentionalDisconnect = false;
+let intentionalDisconnectPort = null;
 let manuallyDisconnected = false;
 let lastServer = null;
 let currentUserId = null;
@@ -48,9 +48,9 @@ const statusHydration = chrome.storage.local
 
 chrome.runtime.onInstalled.addListener((details) => {
   ensureStatusHydrated().then(async () => {
-    manuallyDisconnected = false;
-    await persistStatus();
-    const connection = await connectNative();
+    const connection = details?.reason === "install"
+      ? await reconnectNative()
+      : await connectNative();
     if (details?.reason === "install" && !connection.ok) {
       openSetupPage();
     }
@@ -59,8 +59,6 @@ chrome.runtime.onInstalled.addListener((details) => {
 
 chrome.runtime.onStartup.addListener(() => {
   ensureStatusHydrated().then(() => {
-    manuallyDisconnected = false;
-    persistStatus();
     connectNative();
   });
 });
@@ -83,6 +81,8 @@ async function handleRuntimeMessage(message) {
   await ensureStatusHydrated();
 
   switch (message?.type) {
+    case "connect_native":
+      return reconnectNative();
     case "disconnect_native":
       return disconnectNative();
     case "get_status": {
@@ -94,7 +94,8 @@ async function handleRuntimeMessage(message) {
         ok: connection.ok,
         nativeStatus,
         lastVoiceStatus,
-        lastServer
+        lastServer,
+        manuallyDisconnected
       };
     }
     case "remember_last_server":
@@ -129,20 +130,31 @@ function openSetupPage() {
 
 function connectNative() {
   if (manuallyDisconnected) {
-    return Promise.resolve({ ok: false, nativeStatus });
+    return Promise.resolve({ ok: false, nativeStatus, manuallyDisconnected });
   }
 
   if (nativePort) {
     if (nativeStatus.connected) {
       startPolling(false);
-      return Promise.resolve({ ok: true, nativeStatus });
+      return Promise.resolve({ ok: true, nativeStatus, manuallyDisconnected });
     }
 
-    return waitForConnection();
+    if (connectionAttempt?.port === nativePort) {
+      return connectionAttempt.promise;
+    }
+
+    const stalePort = nativePort;
+    nativePort = null;
+    try {
+      stalePort.disconnect();
+    } catch (_error) {
+      // A stale port may already have been closed by the browser.
+    }
   }
 
+  let port;
   try {
-    nativePort = chrome.runtime.connectNative(HOST_NAME);
+    port = chrome.runtime.connectNative(HOST_NAME);
   } catch (error) {
     nativeStatus = {
       ...nativeStatus,
@@ -151,32 +163,12 @@ function connectNative() {
       lastError: error.message || String(error)
     };
     persistStatus();
-    return Promise.resolve({ ok: false, nativeStatus });
+    return Promise.resolve({ ok: false, nativeStatus, manuallyDisconnected });
   }
 
-  nativePort.onMessage.addListener(handleNativeMessage);
-  nativePort.onDisconnect.addListener(() => {
-    stopPolling();
-    stopPresenceRefresh();
-    resolvePollReadinessWaiters({
-      shouldPoll: false,
-      reason: "desktop_disconnected",
-      message: "Desktop app disconnected."
-    });
-    const lastError = intentionalDisconnect
-      ? "Disconnected."
-      : chrome.runtime.lastError?.message || "Native host disconnected.";
-    intentionalDisconnect = false;
-    nativeStatus = {
-      ...nativeStatus,
-      connecting: false,
-      connected: false,
-      lastError
-    };
-    nativePort = null;
-    persistStatus();
-    resolveConnectWaiters({ ok: false, nativeStatus });
-  });
+  nativePort = port;
+  port.onMessage.addListener((message) => handleNativeMessage(port, message));
+  port.onDisconnect.addListener(() => handleNativeDisconnect(port));
 
   nativeStatus = {
     ...nativeStatus,
@@ -186,8 +178,15 @@ function connectNative() {
   };
   persistStatus();
 
+  let resolveAttempt;
+  const promise = new Promise((resolve) => {
+    resolveAttempt = resolve;
+  });
+  const timeout = setTimeout(() => handleConnectionTimeout(port), 2500);
+  connectionAttempt = { port, promise, resolve: resolveAttempt, timeout };
+
   try {
-    nativePort.postMessage({
+    port.postMessage({
       type: "hello",
       extensionVersion: chrome.runtime.getManifest().version,
       protocolVersion: PROTOCOL_VERSION
@@ -199,49 +198,62 @@ function connectNative() {
       connected: false,
       lastError: error.message || String(error)
     };
-    nativePort = null;
+    if (nativePort === port) {
+      nativePort = null;
+    }
     persistStatus();
-    return Promise.resolve({ ok: false, nativeStatus });
+    finishConnectionAttempt(port, {
+      ok: false,
+      nativeStatus,
+      manuallyDisconnected
+    });
+    try {
+      port.disconnect();
+    } catch (_disconnectError) {
+      // The failed post may already have closed the port.
+    }
   }
 
-  return waitForConnection();
+  return promise;
 }
 
-function waitForConnection() {
-  return new Promise((resolve) => {
-    connectWaiters.push(resolve);
-    setTimeout(() => {
-      if (nativeStatus.connected) {
-        resolve({ ok: true, nativeStatus });
-        return;
-      }
-
-      nativeStatus = {
-        ...nativeStatus,
-        connecting: false,
-        connected: false,
-        lastError: nativeStatus.lastError || "Timed out waiting for the desktop app."
-      };
-      persistStatus();
-      resolveConnectWaiters({ ok: false, nativeStatus });
-    }, 2500);
-  });
+async function reconnectNative() {
+  manuallyDisconnected = false;
+  nativeStatus = {
+    ...nativeStatus,
+    lastError: null
+  };
+  await persistStatus();
+  return connectNative();
 }
 
-function disconnectNative() {
+async function disconnectNative() {
   stopPolling();
   stopPresenceRefresh();
 
-  if (nativePort) {
-    intentionalDisconnect = true;
+  manuallyDisconnected = true;
+  nativeStatus = {
+    ...nativeStatus,
+    connecting: false,
+    connected: false,
+    lastError: "Disconnected."
+  };
+
+  const port = nativePort;
+  if (port) {
+    intentionalDisconnectPort = port;
     try {
-      nativePort.postMessage({ type: "disconnect" });
+      port.postMessage({ type: "disconnect" });
     } catch (_error) {
       // The port may already be closing. The local status is still updated below.
     }
 
-    const port = nativePort;
     nativePort = null;
+    finishConnectionAttempt(port, {
+      ok: false,
+      nativeStatus,
+      manuallyDisconnected
+    });
     setTimeout(() => {
       try {
         port.disconnect();
@@ -251,24 +263,25 @@ function disconnectNative() {
     }, 50);
   }
 
-  manuallyDisconnected = true;
-  nativeStatus = {
-    ...nativeStatus,
-    connecting: false,
-    connected: false,
-    lastError: "Disconnected."
-  };
-  persistStatus();
-  resolveConnectWaiters({ ok: false, nativeStatus });
+  await persistStatus();
   resolvePollReadinessWaiters({
     shouldPoll: false,
     reason: "desktop_disconnected",
     message: "Desktop app disconnected."
   });
-  return Promise.resolve({ ok: true, nativeStatus, lastVoiceStatus });
+  return {
+    ok: true,
+    nativeStatus,
+    lastVoiceStatus,
+    manuallyDisconnected
+  };
 }
 
-function handleNativeMessage(message) {
+function handleNativeMessage(port, message) {
+  if (nativePort !== port) {
+    return;
+  }
+
   if (message?.type === "hello_ack") {
     nativeStatus = {
       connecting: false,
@@ -284,7 +297,11 @@ function handleNativeMessage(message) {
       robloxLoggedIn: null
     };
     persistStatus();
-    resolveConnectWaiters({ ok: true, nativeStatus });
+    finishConnectionAttempt(port, {
+      ok: true,
+      nativeStatus,
+      manuallyDisconnected
+    });
     if (lastServer) {
       postNative({ type: "last_server", server: lastServer });
     }
@@ -309,6 +326,79 @@ function handleNativeMessage(message) {
         postNative(envelope);
       });
   }
+}
+
+function handleNativeDisconnect(port) {
+  const intentional = intentionalDisconnectPort === port;
+  if (intentional) {
+    intentionalDisconnectPort = null;
+  }
+
+  const runtimeError = chrome.runtime.lastError?.message;
+  if (nativePort !== port) {
+    return;
+  }
+
+  stopPolling();
+  stopPresenceRefresh();
+  resolvePollReadinessWaiters({
+    shouldPoll: false,
+    reason: "desktop_disconnected",
+    message: "Desktop app disconnected."
+  });
+  nativeStatus = {
+    ...nativeStatus,
+    connecting: false,
+    connected: false,
+    lastError: intentional
+      ? "Disconnected."
+      : runtimeError || "Native host disconnected."
+  };
+  nativePort = null;
+  persistStatus();
+  finishConnectionAttempt(port, {
+    ok: false,
+    nativeStatus,
+    manuallyDisconnected
+  });
+}
+
+function handleConnectionTimeout(port) {
+  if (connectionAttempt?.port !== port) {
+    return;
+  }
+
+  nativeStatus = {
+    ...nativeStatus,
+    connecting: false,
+    connected: false,
+    lastError: nativeStatus.lastError || "Timed out waiting for the desktop app."
+  };
+  if (nativePort === port) {
+    nativePort = null;
+  }
+  persistStatus();
+  finishConnectionAttempt(port, {
+    ok: false,
+    nativeStatus,
+    manuallyDisconnected
+  });
+  try {
+    port.disconnect();
+  } catch (_error) {
+    // The browser may have closed the timed-out port already.
+  }
+}
+
+function finishConnectionAttempt(port, result) {
+  if (connectionAttempt?.port !== port) {
+    return;
+  }
+
+  const attempt = connectionAttempt;
+  connectionAttempt = null;
+  clearTimeout(attempt.timeout);
+  attempt.resolve(result);
 }
 
 function startPolling(immediate) {
@@ -653,13 +743,17 @@ function cleanString(value) {
 }
 
 function postNative(message) {
-  if (!nativePort) {
+  const port = nativePort;
+  if (!port) {
     return;
   }
 
   try {
-    nativePort.postMessage(message);
+    port.postMessage(message);
   } catch (error) {
+    if (nativePort === port) {
+      nativePort = null;
+    }
     nativeStatus = {
       ...nativeStatus,
       connected: false,
@@ -668,13 +762,16 @@ function postNative(message) {
     };
     stopPolling();
     persistStatus();
-  }
-}
-
-function resolveConnectWaiters(result) {
-  const waiters = connectWaiters.splice(0);
-  for (const resolve of waiters) {
-    resolve(result);
+    finishConnectionAttempt(port, {
+      ok: false,
+      nativeStatus,
+      manuallyDisconnected
+    });
+    try {
+      port.disconnect();
+    } catch (_disconnectError) {
+      // The failed post may already have closed the port.
+    }
   }
 }
 

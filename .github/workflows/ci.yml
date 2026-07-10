@@ -42,3 +42,5 @@ jobs:
           node --check extension/rejoin_page.js
       - name: Manifest parse
         run: node -e "JSON.parse(require('fs').readFileSync('extension/manifest.json','utf8'))"
+      - name: Connection lifecycle tests
+        run: node --test tests/extension_service_worker.test.cjs
