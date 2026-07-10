@@ -138,7 +138,30 @@ function New-ExtensionZip {
     if (Test-Path -LiteralPath $DestinationZip) {
         Remove-Item -LiteralPath $DestinationZip -Force
     }
-    Compress-Archive -Path (Join-Path $SourceDirectory "*") -DestinationPath $DestinationZip -Force
+
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $sourceRoot = (Resolve-Path -LiteralPath $SourceDirectory).Path.TrimEnd('\', '/')
+    $zip = [System.IO.Compression.ZipFile]::Open(
+        $DestinationZip,
+        [System.IO.Compression.ZipArchiveMode]::Create
+    )
+    try {
+        Get-ChildItem -LiteralPath $sourceRoot -File -Recurse |
+            Sort-Object FullName |
+            ForEach-Object {
+                $relative = $_.FullName.Substring($sourceRoot.Length + 1).Replace('\', '/')
+                [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                    $zip,
+                    $_.FullName,
+                    $relative,
+                    [System.IO.Compression.CompressionLevel]::Optimal
+                ) | Out-Null
+            }
+    }
+    finally {
+        $zip.Dispose()
+    }
 }
 
 Export-ExtensionIcons -SourceLogo $LogoPath -Destination $iconsDir
