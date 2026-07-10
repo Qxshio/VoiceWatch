@@ -50,6 +50,11 @@ top-level `Update Available` button appears in the tray menu. Updates are
 user-clicked: Voice Watch downloads the new installer, closes itself, lets the
 installer refresh the app, then starts Voice Watch again.
 
+> [!IMPORTANT]
+> Voice Watch 0.1.3 through 0.1.7 can be blocked by Windows when starting their
+> update helper. Install 0.1.8 or newer manually once using the release installer.
+> Your settings are preserved, and later updates can use the in-app updater.
+
 ## The problem Voice Watch solves
 
 Roblox voice chat suspensions can leave you guessing. The Roblox client may keep

@@ -15,7 +15,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_
 const RELEASES_URL: &str = "https://api.github.com/repos/Qxshio/VoiceWatch/releases?per_page=10";
 const USER_AGENT: &str = "VoiceWatch";
 const GITHUB_API_VERSION: &str = "2022-11-28";
-const UPDATE_HELPER_EXE: &str = "voice-watch-updater.exe";
+const UPDATE_HELPER_EXE: &str = "voice-watch-handoff.exe";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpdateInfo {
@@ -209,7 +209,7 @@ fn launch_update_helper(installer_path: &Path) -> Result<()> {
     fs::create_dir_all(&helper_dir)
         .with_context(|| format!("failed to create {}", helper_dir.display()))?;
 
-    let helper_path = helper_dir.join(format!("{}-{UPDATE_HELPER_EXE}", std::process::id()));
+    let helper_path = update_helper_path(&helper_dir, std::process::id());
     fs::copy(&current_exe, &helper_path).with_context(|| {
         format!(
             "failed to copy update helper from {} to {}",
@@ -317,6 +317,10 @@ fn installer_asset_name(version: &str) -> String {
     format!("VoiceWatch-{version}-Setup.exe")
 }
 
+fn update_helper_path(helper_dir: &Path, pid: u32) -> PathBuf {
+    helper_dir.join(format!("{pid}-{UPDATE_HELPER_EXE}"))
+}
+
 impl ReleaseVersion {
     fn parse_tag(tag: &str) -> Option<Self> {
         Self::parse(tag.trim_start_matches('v'))
@@ -414,6 +418,21 @@ mod tests {
         );
 
         assert!(selected.is_none());
+    }
+
+    #[test]
+    fn update_helper_name_avoids_windows_installer_detection() {
+        let path = update_helper_path(Path::new(r"C:\Temp\VoiceWatch"), 1234);
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap()
+            .to_ascii_lowercase();
+
+        assert_eq!(name, "1234-voice-watch-handoff.exe");
+        for trigger in ["setup", "install", "update", "patch"] {
+            assert!(!name.contains(trigger));
+        }
     }
 
     fn release(tag_name: &str, draft: bool, assets: Vec<&str>) -> GitHubRelease {

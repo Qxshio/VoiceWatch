@@ -41,6 +41,10 @@ jobs:
       - name: Build release executable
         run: cargo build --release
 
+      - name: Smoke test update handoff
+        shell: pwsh
+        run: .\scripts\test-update-handoff.ps1
+
       - name: Package store extensions
         shell: pwsh
         run: .\scripts\package-extensions.ps1
