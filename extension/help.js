@@ -56,25 +56,25 @@ const help = {
 };
 
 const params = new URLSearchParams(window.location.search);
-const browser = help[params.get("browser")] || help.chromium;
+const browserHelp = help[params.get("browser")] || help.chromium;
 
-document.querySelector("#title").textContent = `${browser.name} setup help`;
-document.querySelector("#summary").textContent = `Extensions page: ${browser.url}`;
+document.querySelector("#title").textContent = `${browserHelp.name} setup help`;
+document.querySelector("#summary").textContent = `Extensions page: ${browserHelp.url}`;
 const extensionsLink = document.querySelector("#extensions-link");
-extensionsLink.href = browser.url;
-extensionsLink.textContent = `Open ${browser.url}`;
+extensionsLink.href = browserHelp.url;
+extensionsLink.textContent = `Open ${browserHelp.url}`;
 
 const steps = document.querySelector("#steps");
-browser.steps.forEach((step, index) => {
+browserHelp.steps.forEach((step, index) => {
   const item = document.createElement("li");
   if (index === 0) {
     item.append("Open ");
     const link = document.createElement("a");
-    link.href = browser.url;
+    link.href = browserHelp.url;
     link.target = "_blank";
     link.rel = "noreferrer";
-    link.textContent = browser.url;
-    item.append(link, ` in ${browser.name}.`);
+    link.textContent = browserHelp.url;
+    item.append(link, ` in ${browserHelp.name}.`);
   } else {
     item.textContent = step;
   }

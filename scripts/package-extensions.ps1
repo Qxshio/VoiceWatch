@@ -114,13 +114,11 @@ function Write-FirefoxManifest {
     $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
     $manifest.background = [ordered]@{
         scripts = @("service_worker.js")
-        service_worker = "service_worker.js"
-        type = "module"
     }
     $manifest | Add-Member -NotePropertyName browser_specific_settings -NotePropertyValue ([ordered]@{
         gecko = [ordered]@{
             id = "voice-watch-connector@qxshio.github.io"
-            strict_min_version = "109.0"
+            strict_min_version = "142.0"
             data_collection_permissions = [ordered]@{
                 required = @("none")
             }
