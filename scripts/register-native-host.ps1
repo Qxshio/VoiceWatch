@@ -1,9 +1,11 @@
 param(
-    [ValidateSet("Chrome", "Edge", "Brave", "Vivaldi", "Opera", "Chromium", "All", "Both")]
+    [ValidateSet("Chrome", "Edge", "Brave", "Vivaldi", "Opera", "Chromium", "Firefox", "All", "Both")]
     [string] $Browser = "All",
 
     [Parameter(Mandatory = $true)]
-    [ValidatePattern("^[a-p]{32}$")]
+    [ValidateScript({
+        $_ -match '^[a-p]{32}$' -or $_ -eq 'voice-watch-connector@qxshio.github.io'
+    })]
     [string] $ExtensionId,
 
     [string] $ExePath
@@ -30,31 +32,52 @@ if (-not (Test-Path -LiteralPath $resolvedExePath)) {
     throw "Executable not found: $resolvedExePath. Build the app first or pass -ExePath."
 }
 
+$firefoxExtensionId = "voice-watch-connector@qxshio.github.io"
+$isFirefox = $ExtensionId -eq $firefoxExtensionId
+if ($isFirefox -and $Browser -notin @("All", "Firefox")) {
+    throw "The Firefox add-on ID can only be registered for Firefox."
+}
+if (-not $isFirefox -and $Browser -eq "Firefox") {
+    throw "A Chromium extension ID cannot be registered for Firefox."
+}
+
 $manifestDir = Join-Path $env:LOCALAPPDATA "VoiceWatch\native-messaging"
-$manifestPath = Join-Path $manifestDir "$hostName.json"
+$manifestName = if ($isFirefox) { "$hostName-firefox.json" } else { "$hostName.json" }
+$manifestPath = Join-Path $manifestDir $manifestName
 New-Item -ItemType Directory -Force -Path $manifestDir | Out-Null
 
-$origin = "chrome-extension://$ExtensionId/"
-$allowedOrigins = @()
+$allowedIds = @()
 if (Test-Path -LiteralPath $manifestPath) {
     try {
         $existingManifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-        if ($existingManifest.allowed_origins) {
-            $allowedOrigins = @($existingManifest.allowed_origins)
+        $existingIds = if ($isFirefox) {
+            $existingManifest.allowed_extensions
+        }
+        else {
+            $existingManifest.allowed_origins
+        }
+        if ($existingIds) {
+            $allowedIds = @($existingIds)
         }
     }
     catch {
-        $allowedOrigins = @()
+        $allowedIds = @()
     }
 }
-$allowedOrigins = @($allowedOrigins + $origin) | Sort-Object -Unique
+$allowedId = if ($isFirefox) { $ExtensionId } else { "chrome-extension://$ExtensionId/" }
+$allowedIds = @($allowedIds + $allowedId) | Sort-Object -Unique
 
 $manifest = [ordered]@{
     name = $hostName
     description = "Voice Watch native messaging host"
     path = $resolvedExePath
     type = "stdio"
-    allowed_origins = $allowedOrigins
+}
+if ($isFirefox) {
+    $manifest["allowed_extensions"] = $allowedIds
+}
+else {
+    $manifest["allowed_origins"] = $allowedIds
 }
 
 $manifest | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
@@ -80,6 +103,7 @@ function Get-BrowserRegistryPaths {
             "HKCU:\Software\Opera Software\Opera GX Stable\NativeMessagingHosts\$hostName"
         )
         Chromium = "HKCU:\Software\Chromium\NativeMessagingHosts\$hostName"
+        Firefox = "HKCU:\Software\Mozilla\NativeMessagingHosts\$hostName"
     }
 
     if ($TargetBrowser -eq "Both") {
@@ -87,6 +111,9 @@ function Get-BrowserRegistryPaths {
     }
 
     if ($TargetBrowser -eq "All") {
+        if ($isFirefox) {
+            return @($paths.Firefox)
+        }
         return @(
             $paths.Chrome,
             $paths.Edge,

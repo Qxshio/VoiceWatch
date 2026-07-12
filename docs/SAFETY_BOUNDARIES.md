@@ -29,7 +29,8 @@ Allowed behavior:
   `placeId`, `gameInstanceId`/`GameId`, `accessCode`, or `linkCode`.
 - Browser extension reads Roblox presence for the signed-in browser user and
   sends only sanitized `placeId`/`gameInstanceId` metadata to the local app.
-- Desktop app opens a Roblox app deep link after the user clicks a rejoin
-  button.
-- Extension uses Roblox's page launcher only on the user-opened rejoin page and
-  only with the explicit metadata in that URL.
+- Desktop app sends a rejoin command only after the user clicks a rejoin button.
+- Extension uses Roblox's page launcher only on the resulting marked rejoin page
+  and only with the explicit sanitized metadata in that URL.
+- Desktop app may use a Roblox app deep link only as a local fallback when the
+  browser command cannot be queued.

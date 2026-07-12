@@ -26,9 +26,11 @@ The extension does not request the `cookies` permission.
 The extension also has access to Roblox game pages, the authenticated user
 endpoint, and Roblox presence. That access is used to detect the current
 `placeId`/`gameInstanceId` for the user who is already signed in to Roblox in
-that browser. It sends only sanitized server metadata to the desktop app, never
-cookies or tokens. The game-page launcher remains as a fallback for marked
-Voice Watch rejoin URLs.
+that browser. Presence is requested only while the desktop detects a visible
+Roblox game and is limited to once per minute; the user ID is cached locally for
+five minutes. The extension sends only sanitized server metadata to the desktop
+app, never cookies or tokens. The game-page launcher handles only marked Voice
+Watch rejoin URLs created after a user click.
 
 ## What is sent to the desktop app
 

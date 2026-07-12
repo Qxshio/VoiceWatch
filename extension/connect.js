@@ -56,7 +56,10 @@ async function finishSetup() {
     }
 
     result.textContent = "Opening Voice Watch setup...";
-    window.location.href = registrationLink(chrome.runtime.id, "all");
+    window.location.href = registrationLink(
+      chrome.runtime.id,
+      isFirefoxExtensionId(chrome.runtime.id) ? "firefox" : "all"
+    );
 
     window.setTimeout(() => {
       refreshStatus();
@@ -213,4 +216,8 @@ function formatDateTime(value) {
 
 function registrationLink(extensionId, browser) {
   return `voice-watch://register-native-host?extensionId=${extensionId}&browser=${encodeURIComponent(browser)}`;
+}
+
+function isFirefoxExtensionId(extensionId) {
+  return String(extensionId || "").includes("@");
 }

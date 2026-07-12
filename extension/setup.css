@@ -109,7 +109,20 @@ button {
   cursor: pointer;
 }
 
-button + button {
+.button-link {
+  display: inline-flex;
+  align-items: center;
+  height: 38px;
+  padding: 0 16px;
+  border-radius: 7px;
+  color: #07130e;
+  background: #2ab878;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+button + button,
+.button-link + button {
   color: #f4f7fb;
   background: #2b3038;
 }
@@ -160,16 +173,13 @@ pre {
   color: #ffcd7a;
 }
 
-.status.valid {
-  color: #75dfa8;
-}
-
 .success {
   margin-top: 10px;
   color: #d8e0e8;
 }
 
 .success-page,
+.update-page,
 .finish-page {
   margin-top: 12px;
   padding: 28px;
@@ -178,19 +188,50 @@ pre {
   background: #17231d;
 }
 
+.update-page {
+  border-color: #7b5b23;
+  background: #241f16;
+}
+
 .finish-page {
   border-color: #33506f;
   background: #17202b;
 }
 
 .success-mark,
+.update-mark,
 .finish-mark {
+  display: block;
   position: relative;
   width: 54px;
   height: 54px;
   margin-bottom: 16px;
   border-radius: 50%;
   background: #2ab878;
+}
+
+.update-mark {
+  background: #f5a830;
+}
+
+.update-mark::before,
+.update-mark::after {
+  content: "";
+  position: absolute;
+  left: 25px;
+  width: 5px;
+  border-radius: 999px;
+  background: #171006;
+}
+
+.update-mark::before {
+  top: 12px;
+  height: 22px;
+}
+
+.update-mark::after {
+  top: 39px;
+  height: 5px;
 }
 
 .finish-mark {
@@ -228,7 +269,8 @@ pre {
   top: 29px;
 }
 
-.success-page ol {
+.success-page ol,
+.update-page ol {
   margin: 16px 0 0;
   padding-left: 20px;
   color: #d8e0e8;

@@ -44,6 +44,15 @@ const help = {
       "Use Load unpacked to select the Voice Watch extension folder."
     ]
   },
+  firefox: {
+    name: "Firefox",
+    url: "about:debugging#/runtime/this-firefox",
+    steps: [
+      "Open about:debugging#/runtime/this-firefox in Firefox.",
+      "Choose Load Temporary Add-on.",
+      "Select manifest.json from the Firefox connector package."
+    ]
+  },
   chromium: {
     name: "Chromium-based browser",
     url: "chrome://extensions",

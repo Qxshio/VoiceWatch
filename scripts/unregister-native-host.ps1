@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("Chrome", "Edge", "Brave", "Vivaldi", "Opera", "Chromium", "All", "Both")]
+    [ValidateSet("Chrome", "Edge", "Brave", "Vivaldi", "Opera", "Chromium", "Firefox", "All", "Both")]
     [string] $Browser = "All",
 
     [switch] $RemoveManifest
@@ -8,7 +8,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $hostName = "com.voice_watch.native"
-$manifestPath = Join-Path $env:LOCALAPPDATA "VoiceWatch\native-messaging\$hostName.json"
+$manifestDir = Join-Path $env:LOCALAPPDATA "VoiceWatch\native-messaging"
 
 function Remove-BrowserHost {
     param([string] $RegistryPath)
@@ -32,6 +32,7 @@ function Get-BrowserRegistryPaths {
             "HKCU:\Software\Opera Software\Opera GX Stable\NativeMessagingHosts\$hostName"
         )
         Chromium = "HKCU:\Software\Chromium\NativeMessagingHosts\$hostName"
+        Firefox = "HKCU:\Software\Mozilla\NativeMessagingHosts\$hostName"
     }
 
     if ($TargetBrowser -eq "Both") {
@@ -45,7 +46,8 @@ function Get-BrowserRegistryPaths {
             $paths.Brave,
             $paths.Vivaldi,
             $paths.Opera,
-            $paths.Chromium
+            $paths.Chromium,
+            $paths.Firefox
         ) | Select-Object -Unique
     }
 
@@ -56,8 +58,23 @@ foreach ($registryPath in (Get-BrowserRegistryPaths $Browser)) {
     Remove-BrowserHost $registryPath
 }
 
-if ($RemoveManifest -and (Test-Path -LiteralPath $manifestPath)) {
-    Remove-Item -LiteralPath $manifestPath -Force
+if ($RemoveManifest) {
+    $manifestNames = if ($Browser -eq "Firefox") {
+        @("$hostName-firefox.json")
+    }
+    elseif ($Browser -eq "All") {
+        @("$hostName.json", "$hostName-firefox.json")
+    }
+    else {
+        @("$hostName.json")
+    }
+
+    foreach ($manifestName in $manifestNames) {
+        $manifestPath = Join-Path $manifestDir $manifestName
+        if (Test-Path -LiteralPath $manifestPath) {
+            Remove-Item -LiteralPath $manifestPath -Force
+        }
+    }
 }
 
 Write-Host "Unregistered $hostName"

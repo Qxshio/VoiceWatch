@@ -52,13 +52,12 @@ Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDi
 #if ExtensionId != ""
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\register-native-host.ps1"" -ExtensionId ""{#ExtensionId}"" -ExePath ""{app}\{#MyAppExeName}"" -Browser All"; Flags: runhidden; Tasks: nativehost
 #endif
-Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent unchecked
+Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
 
 [Registry]
 Root: HKCU; Subkey: "Software\Classes\voice-watch"; ValueType: string; ValueData: "URL:Voice Watch"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Classes\voice-watch"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
 Root: HKCU; Subkey: "Software\Classes\voice-watch\shell\open\command"; ValueType: string; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "{#MyAppName}"; ValueData: """{app}\{#MyAppExeName}"""; Flags: uninsdeletevalue
 
 [Code]
 procedure StopRunningVoiceWatch();
@@ -79,6 +78,16 @@ function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   StopRunningVoiceWatch();
   Result := '';
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usUninstall then
+    RegDeleteValue(
+      HKCU,
+      'Software\Microsoft\Windows\CurrentVersion\Run',
+      '{#MyAppName}'
+    );
 end;
 
 #if ExtensionId != ""

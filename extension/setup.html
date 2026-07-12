@@ -11,10 +11,26 @@
       <header>
         <span class="mark" aria-hidden="true"></span>
         <div>
-          <h1>Set up Voice Watch</h1>
-          <p>Load the browser connector once, then finish the desktop connection from inside the extension.</p>
+          <h1 id="page-title">Set up Voice Watch</h1>
+          <p id="page-copy">Load the browser connector once, then finish the desktop connection from inside the extension.</p>
         </div>
       </header>
+
+      <section id="extension-update" class="update-page" hidden>
+        <span class="update-mark" aria-hidden="true"></span>
+        <h2>Update browser connector</h2>
+        <p id="update-version">The desktop app needs a newer connector.</p>
+        <p class="status">Voice Watch has asked each outdated connected browser to check for an update or reload its bundled connector.</p>
+        <ol>
+          <li>Wait a few seconds and check whether Update extension disappears from the tray.</li>
+          <li>If it remains, fully close and reopen the browser once.</li>
+          <li>If the browser store has not published the update yet, install the matching connector from the latest release.</li>
+        </ol>
+        <div class="actions">
+          <a class="button-link" href="https://github.com/Qxshio/VoiceWatch/releases/latest" target="_blank" rel="noreferrer">Get latest connector</a>
+          <button id="update-help" type="button">Browser help</button>
+        </div>
+      </section>
 
       <section id="success-page" class="success-page" hidden>
         <div class="success-mark" aria-hidden="true"></div>
@@ -32,7 +48,7 @@
 
       <section id="unsupported-page" class="note" hidden>
         <h2>No supported browser found</h2>
-        <p>Voice Watch needs Chrome, Edge, Brave, Vivaldi, Opera, or Chromium for the browser connector. Install one of those browsers, then open this setup page again.</p>
+        <p>The bundled unpacked folder supports Chrome, Edge, Brave, Vivaldi, Opera, and Chromium. For Firefox, install the Firefox connector package attached to the Voice Watch release; its Finish setup page will register the desktop connection automatically.</p>
       </section>
 
       <section id="extension-finish" class="finish-page" hidden>
@@ -53,7 +69,7 @@
           <div class="content">
             <h2>Open browser setup help</h2>
             <p>Choose the browser you want to use for Roblox. The help page shows where Developer mode and Load unpacked are in that browser.</p>
-            <div id="browser-actions" class="actions">
+            <div class="actions">
               <button id="browser-help" type="button">Help me find it</button>
             </div>
             <div id="browser-field">

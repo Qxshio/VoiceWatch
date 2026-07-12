@@ -1,9 +1,13 @@
 const setupFlow = document.querySelector("#setup-flow");
+const extensionUpdatePage = document.querySelector("#extension-update");
 const successPage = document.querySelector("#success-page");
 const unsupportedPage = document.querySelector("#unsupported-page");
 const extensionFinishPage = document.querySelector("#extension-finish");
 const successTitle = document.querySelector("#success-title");
 const successCopy = document.querySelector("#success-copy");
+const pageTitle = document.querySelector("#page-title");
+const pageCopy = document.querySelector("#page-copy");
+const updateVersion = document.querySelector("#update-version");
 const browserField = document.querySelector("#browser-field");
 const browserStatus = document.querySelector("#browser-status");
 const browserSelect = document.querySelector("#browser");
@@ -15,6 +19,7 @@ const finishSetupButton = document.querySelector("#finish-setup");
 const openFolderButton = document.querySelector("#open-folder");
 const copyPathButton = document.querySelector("#copy-path");
 const backToSetupButton = document.querySelector("#back-to-setup");
+const updateHelpButton = document.querySelector("#update-help");
 
 const browsers = {
   brave: { label: "Brave" },
@@ -22,14 +27,16 @@ const browsers = {
   edge: { label: "Microsoft Edge" },
   vivaldi: { label: "Vivaldi" },
   opera: { label: "Opera or Opera GX" },
-  chromium: { label: "Chromium" }
+  chromium: { label: "Chromium" },
+  firefox: { label: "Firefox" }
 };
 
 const params = new URLSearchParams(window.location.search);
 const hasExtensionRuntime =
   typeof chrome !== "undefined" && Boolean(chrome.runtime?.id);
 const isExtensionSetupPage =
-  hasExtensionRuntime && window.location.protocol === "chrome-extension:";
+  hasExtensionRuntime &&
+  ["chrome-extension:", "moz-extension:"].includes(window.location.protocol);
 const folderPath = currentFolderPath();
 let registrationStarted = false;
 let connectionPollTimer = null;
@@ -49,6 +56,10 @@ finishHelpButton.addEventListener("click", async () => {
 
 finishSetupButton.addEventListener("click", finishExtensionSetup);
 
+updateHelpButton.addEventListener("click", async () => {
+  openHelpForBrowser((await detectCurrentBrowser()) || "chrome");
+});
+
 openFolderButton.addEventListener("click", () => {
   window.location.href = "./";
 });
@@ -61,6 +72,7 @@ copyPathButton.addEventListener("click", async () => {
 backToSetupButton.addEventListener("click", () => {
   clearConnectionPolling();
   successPage.hidden = true;
+  extensionUpdatePage.hidden = true;
   unsupportedPage.hidden = true;
   extensionFinishPage.hidden = true;
   setupFlow.hidden = false;
@@ -68,6 +80,11 @@ backToSetupButton.addEventListener("click", () => {
 
 async function initialize() {
   const detectedBrowser = await detectCurrentBrowser();
+
+  if (params.get("mode") === "update") {
+    showExtensionUpdate();
+    return;
+  }
 
   if (isExtensionSetupPage) {
     showExtensionFinish(detectedBrowser);
@@ -91,8 +108,23 @@ async function initialize() {
   }
 }
 
+function showExtensionUpdate() {
+  const desktopVersion = params.get("desktopVersion") || "the current version";
+  const extensionVersion = params.get("extensionVersion") || "an older version";
+  pageTitle.textContent = "Update Voice Watch connector";
+  pageCopy.textContent = "Keep the desktop app and browser connector on compatible versions.";
+  updateVersion.textContent =
+    `Desktop ${desktopVersion} is newer than connector ${extensionVersion}.`;
+  setupFlow.hidden = true;
+  successPage.hidden = true;
+  unsupportedPage.hidden = true;
+  extensionFinishPage.hidden = true;
+  extensionUpdatePage.hidden = false;
+}
+
 function showExtensionFinish(detectedBrowser) {
   setupFlow.hidden = true;
+  extensionUpdatePage.hidden = true;
   successPage.hidden = true;
   unsupportedPage.hidden = true;
   extensionFinishPage.hidden = false;
@@ -128,7 +160,10 @@ async function finishExtensionSetup() {
   }
 
   finishStatus.textContent = "Opening Voice Watch to finish the desktop connection.";
-  window.location.href = registrationLink(chrome.runtime.id, "all");
+  window.location.href = registrationLink(
+    chrome.runtime.id,
+    isFirefoxExtensionId(chrome.runtime.id) ? "firefox" : "all"
+  );
 
   window.setTimeout(() => {
     finishSetupButton.disabled = false;
@@ -206,7 +241,7 @@ function availableBrowserKeys(detectedBrowser) {
     : [];
 
   const values = fromDesktop.length > 0 ? fromDesktop : [];
-  if (detectedBrowser && !values.includes(detectedBrowser)) {
+  if (detectedBrowser && detectedBrowser !== "firefox" && !values.includes(detectedBrowser)) {
     values.unshift(detectedBrowser);
   }
 
@@ -270,6 +305,9 @@ async function detectCurrentBrowser() {
   if (userAgent.includes("Vivaldi") || window.vivaldi) {
     return "vivaldi";
   }
+  if (userAgent.includes("Firefox/")) {
+    return "firefox";
+  }
   if (userAgent.includes("Chromium")) {
     return "chromium";
   }
@@ -282,6 +320,7 @@ async function detectCurrentBrowser() {
 
 function showUnsupportedBrowser() {
   setupFlow.hidden = true;
+  extensionUpdatePage.hidden = true;
   successPage.hidden = true;
   extensionFinishPage.hidden = true;
   unsupportedPage.hidden = false;
@@ -296,6 +335,7 @@ function showSuccess(title, copy) {
   setupFlow.hidden = true;
   unsupportedPage.hidden = true;
   extensionFinishPage.hidden = true;
+  extensionUpdatePage.hidden = true;
   successPage.hidden = false;
 }
 
@@ -309,6 +349,10 @@ function openHelpForBrowser(browser) {
 
 function registrationLink(extensionId, browser) {
   return `voice-watch://register-native-host?extensionId=${extensionId}&browser=${encodeURIComponent(browser)}`;
+}
+
+function isFirefoxExtensionId(extensionId) {
+  return String(extensionId || "").includes("@");
 }
 
 function selectedBrowser() {

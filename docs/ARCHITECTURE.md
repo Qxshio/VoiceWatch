@@ -3,7 +3,8 @@
 Voice Watch is split into two local components:
 
 1. A Rust Windows desktop app.
-2. A Chromium Manifest V3 browser extension.
+2. A Manifest V3 browser extension, packaged for Chromium-based browsers and
+   Firefox.
 
 The browser extension owns authenticated Roblox API access because the browser
 already has the user's Roblox session. The desktop app owns local UX: tray menu,
@@ -31,6 +32,9 @@ desktop app whether a check is useful:
   again.
 - Otherwise, the extension checks Roblox voice status at the configured
   interval.
+- Current-server presence is refreshed at most once per minute and only while
+  the desktop reports a visible Roblox game window. The authenticated user ID is
+  cached for five minutes inside the extension service worker.
 
 ## Data flow
 
@@ -63,16 +67,32 @@ sequenceDiagram
         end
     end
     Tray->>User: Animated restored HUD with rejoin action
+    User->>Tray: Click Rejoin
+    Tray->>Host: Queue typed rejoin command
+    Host->>Ext: rejoin with sanitized server metadata
+    Ext->>User: Open exact-server launch page in this browser
+    opt Desktop is newer than connector
+        User->>Tray: Click Update extension
+        Tray->>Host: Queue process-targeted update command
+        Host->>Ext: update_extension
+        Ext->>Ext: Request store update or reload bundled files
+    end
 ```
 
 The local IPC bridge between native host mode and the already running tray app
-is represented by `src/ipc.rs`. The first prototype has the trait boundary and
-native host acknowledgement; the named-pipe implementation is planned next.
+is represented by `src/ipc.rs`. It uses a bounded append-only event file for
+host-to-tray events, one atomic shared command file for ordinary actions, and
+per-host command files when every outdated connected browser must receive an
+extension update request. Versioned live-host markers let the tray compare each
+connector independently. The last sanitized voice status and server metadata
+are cached separately so a tray restart does not lose a known suspension
+countdown.
 
 ## Rust slices
 
 - `messages.rs` defines the sanitized protocol shared by the extension and app.
-- `native_messaging.rs` reads and writes Chromium native messaging frames.
+- `native_messaging.rs` reads and writes browser native messaging frames and
+  evaluates polling readiness.
 - `app_state.rs` owns the voice state machine.
 - `countdown.rs` keeps countdown rendering local and monotonic.
 - `process.rs` checks for a visible Roblox game window and Windows microphone
@@ -80,10 +100,9 @@ native host acknowledgement; the named-pipe implementation is planned next.
 - `roblox_logs.rs` extracts best-effort server information from local logs,
   including `GameId`/`gameInstanceId` and private-server access/link codes when
   Roblox records them.
-- `rejoin.rs` converts last-server metadata into a user-clicked Roblox
-  `roblox://` deep link, with the browser page launcher kept as a fallback.
-- `overlay.rs` owns the compact suspension/restored HUD and restore notification
-  fallback.
+- `rejoin.rs` validates last-server metadata and builds local fallback targets;
+  the normal path is a typed command to the connected extension.
+- `overlay.rs` owns the compact suspension/restored HUD and restore sound.
 - `settings_window.rs` owns the native settings UI.
 - `updates.rs` checks GitHub Releases, downloads installer updates, and owns the
   temporary helper mode used to install after the tray app exits.
@@ -95,7 +114,6 @@ native host acknowledgement; the named-pipe implementation is planned next.
 ```text
 Disconnected
 Connected
-RobloxNotRunning
 Checking
 VoiceOk
 TempSuspended

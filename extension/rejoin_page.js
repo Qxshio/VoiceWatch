@@ -2,6 +2,7 @@
   const script = document.currentScript;
   const payload = readPayload(script);
   const startedAt = Date.now();
+  const fastRetryMs = 5000;
   const timeoutMs = 30000;
   const pagePlaceId = cleanNumberString(payload.pagePlaceId);
   const rejoin = normalize(payload.rejoin);
@@ -89,17 +90,15 @@
   }
 
   function retryOrFallback() {
-    if (Date.now() - startedAt < timeoutMs) {
-      window.setTimeout(tryInstall, 250);
+    const elapsedMs = Date.now() - startedAt;
+    if (elapsedMs < timeoutMs) {
+      window.setTimeout(tryInstall, elapsedMs < fastRetryMs ? 250 : 1000);
       return;
     }
 
-    if (!rejoin) {
-      window.setTimeout(tryInstall, 1000);
-      return;
+    if (rejoin) {
+      fallbackToGameStart(rejoin);
     }
-
-    fallbackToGameStart(rejoin);
   }
 
   function fallbackToGameStart(server) {

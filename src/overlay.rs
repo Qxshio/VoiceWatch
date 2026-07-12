@@ -1,6 +1,6 @@
+use crate::ipc;
 use crate::process;
 use crate::rejoin::{open_rejoin_target, LastServer};
-use anyhow::Result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, Once, OnceLock};
 use std::time::{Duration, Instant};
@@ -15,18 +15,11 @@ use windows_sys::Win32::System::Diagnostics::Debug::MessageBeep;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, GetClientRect, GetWindowRect, LoadCursorW,
-    MessageBoxW, RegisterClassW, SetLayeredWindowAttributes, SetWindowPos, ShowWindow,
-    CS_DROPSHADOW, CS_HREDRAW, CS_VREDRAW, HTCAPTION, HWND_TOPMOST, IDC_ARROW, IDOK, LWA_ALPHA,
-    MB_ICONINFORMATION, MB_OK, MB_OKCANCEL, SWP_NOACTIVATE, SWP_SHOWWINDOW, SW_HIDE, SW_SHOWNA,
-    WM_LBUTTONUP, WM_NCHITTEST, WM_PAINT, WM_WINDOWPOSCHANGED, WNDCLASSW, WS_EX_LAYERED,
-    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    RegisterClassW, SetLayeredWindowAttributes, SetWindowPos, ShowWindow, CS_DROPSHADOW,
+    CS_HREDRAW, CS_VREDRAW, HTCAPTION, HWND_TOPMOST, IDC_ARROW, LWA_ALPHA, MB_ICONINFORMATION,
+    SWP_NOACTIVATE, SWP_SHOWWINDOW, SW_HIDE, SW_SHOWNA, WM_LBUTTONUP, WM_NCHITTEST, WM_PAINT,
+    WM_WINDOWPOSCHANGED, WNDCLASSW, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OverlayAction {
-    Dismiss,
-    RejoinLastServer,
-}
 
 #[derive(Debug, Clone)]
 enum HudMode {
@@ -85,38 +78,6 @@ pub fn play_restore_sound() {
     unsafe {
         MessageBeep(MB_ICONINFORMATION);
     }
-}
-
-pub fn show_restored_overlay(last_server: Option<&LastServer>) -> Result<OverlayAction> {
-    let can_rejoin = last_server.is_some_and(LastServer::can_rejoin_exact);
-    let description = if can_rejoin {
-        "Your VC suspension has expired.\n\nPress OK to rejoin your last known server, or Cancel to dismiss."
-    } else {
-        "Your VC suspension has expired.\n\nThe exact server could not be identified."
-    };
-
-    let title = wide("Voice chat restored");
-    let body = wide(description);
-    let buttons = if can_rejoin { MB_OKCANCEL } else { MB_OK };
-    let result = unsafe {
-        MessageBoxW(
-            std::ptr::null_mut(),
-            body.as_ptr(),
-            title.as_ptr(),
-            buttons | MB_ICONINFORMATION,
-        )
-    };
-
-    let action = match result {
-        IDOK if can_rejoin => OverlayAction::RejoinLastServer,
-        _ => OverlayAction::Dismiss,
-    };
-
-    if let (OverlayAction::RejoinLastServer, Some(server)) = (action, last_server) {
-        open_rejoin_target(server)?;
-    }
-
-    Ok(action)
 }
 
 impl SuspensionHud {
@@ -255,6 +216,7 @@ impl SuspensionHud {
                 size.1,
                 SWP_NOACTIVATE | SWP_SHOWWINDOW,
             );
+            IGNORE_NEXT_POSITION_CHANGE.store(false, Ordering::SeqCst);
             InvalidateRect(hwnd, std::ptr::null(), 1);
         }
         Some(hwnd)
@@ -273,7 +235,7 @@ impl SuspensionHud {
 
         self.hwnd = unsafe {
             IGNORE_NEXT_POSITION_CHANGE.store(true, Ordering::SeqCst);
-            CreateWindowExW(
+            let hwnd = CreateWindowExW(
                 WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED,
                 class_name.as_ptr(),
                 title.as_ptr(),
@@ -286,7 +248,9 @@ impl SuspensionHud {
                 std::ptr::null_mut(),
                 hinstance,
                 std::ptr::null(),
-            )
+            );
+            IGNORE_NEXT_POSITION_CHANGE.store(false, Ordering::SeqCst);
+            hwnd
         };
 
         if !self.hwnd.is_null() {
@@ -386,7 +350,9 @@ unsafe extern "system" fn hud_window_proc(
                     let Some(server) = server else {
                         return 0;
                     };
-                    let _ = open_rejoin_target(&server);
+                    if ipc::request_rejoin(&server).is_err() {
+                        let _ = open_rejoin_target(&server);
+                    }
                 }
                 None => {}
             }

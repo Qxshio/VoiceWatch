@@ -3,7 +3,9 @@
 This Manifest V3 extension is the safe authentication bridge for Voice Watch.
 It uses the browser's existing Roblox login session to call
 `https://voice.roblox.com/v1/settings`, then sends only sanitized voice status
-fields to the local desktop app through Chromium native messaging.
+fields to the local desktop app through browser native messaging. Release
+packaging produces Chromium and Firefox-specific manifests from the same
+readable source.
 
 It does not request the `cookies` permission, does not read browser cookie
 storage, and does not send `.ROBLOSECURITY` or any other token to the desktop
@@ -11,10 +13,12 @@ app.
 
 ## Rejoin helper
 
-The extension detects the logged-in user's current Roblox presence and sends
-only sanitized `placeId`/`gameInstanceId` metadata to the desktop app. The
-desktop Rejoin button then opens Roblox directly with a user-clicked
-`roblox://` deep link.
+While the desktop reports a visible Roblox game, the extension refreshes the
+logged-in user's current Roblox presence at most once per minute and sends only
+sanitized `placeId`/`gameInstanceId` metadata to the desktop app. The desktop
+Rejoin button sends a typed command back through the native host, so the same
+browser opens Roblox's exact-server page launcher. A local `roblox://` link is
+kept only as a fallback.
 
 The game-page script also watches Roblox web launch calls and keeps a fallback
 launcher for marked Voice Watch rejoin URLs. It does not read browser cookies or
@@ -33,7 +37,8 @@ The desktop app tells it to skip the request when:
   not-suspended result.
 
 The extension also sleeps locally while a known suspension countdown from the
-last Roblox response has not expired yet.
+last Roblox response has not expired yet, and respects Roblox's `Retry-After`
+delay after a rate-limited response.
 
 When a check is allowed, the extension calls
 `https://voice.roblox.com/v1/settings` with `credentials: "include"` and sends
@@ -55,6 +60,17 @@ to the desktop app automatically.
 After an intentional disconnect, open the same popup and choose **Reconnect
 desktop**. The existing native-host registration is reused, so the extension
 does not need to be removed or installed again.
+
+## Version compatibility
+
+The connector includes its manifest version in the local desktop handshake. If
+the desktop app is newer, Voice Watch shows `Update extension` in the tray. That
+user click requests one browser-managed update check where the API is supported;
+unpacked installations reload from the connector files updated by the desktop
+installer. Firefox relies on its normal add-on updater because it does not expose
+Chromium's manual update-check API. Store updates reload when the browser reports
+that the new package is ready. The connector does not check for updates on a
+timer, and a newer connector is never asked to downgrade.
 
 Manual fallback:
 

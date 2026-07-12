@@ -39,8 +39,10 @@ Do not add code that:
 ```powershell
 cargo build
 cargo test
-cargo run -- --simulate-suspension 10
+node --test tests/extension_service_worker.test.cjs
 ```
 
 For extension development, load `extension/` as an unpacked extension and
-register the native host with `scripts/register-native-host.ps1`.
+register the native host with `scripts/register-native-host.ps1`. Enable
+Developer mode in Voice Watch settings to expose the tray's **Test Suspend**
+action for HUD/countdown testing.

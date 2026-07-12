@@ -18,7 +18,7 @@ This project is not affiliated with Roblox.
 
 Voice Watch is built and maintained as an independent open source project. If it
 helps you, donations make a real difference: they help me justify the time spent
-fixing edge cases, testing across Windows and Chromium browsers, improving the
+fixing edge cases, testing across Windows and supported browsers, improving the
 installer and release flow, and keeping the app free, privacy-first, and
 uncluttered by ads or tracking.
 
@@ -49,6 +49,15 @@ background. When a newer installer is available, the tray icon turns amber and a
 top-level `Update Available` button appears in the tray menu. Updates are
 user-clicked: Voice Watch downloads the new installer, closes itself, lets the
 installer refresh the app, then starts Voice Watch again.
+
+Each connected browser reports its connector version during the local native
+messaging handshake. If the desktop app is newer, the amber tray menu shows an
+`Update extension` action. Clicking it asks every outdated connected browser to
+perform a supported one-time store update check or reload the connector files
+bundled by the desktop installer, then opens fallback instructions for older
+connectors.
+Equal versions need no action. A connector newer than the desktop app is never
+downgraded; the normal desktop `Update Available` flow continues independently.
 
 > [!IMPORTANT]
 > Voice Watch 0.1.3 through 0.1.7 can be blocked by Windows when starting their
@@ -122,6 +131,10 @@ The extension sends only these fields:
 - `denialReason`
 - `checkedAt`
 
+For the user-clicked Rejoin feature, the extension can separately send a
+sanitized `placeId` plus `gameInstanceId`, `accessCode`, or `linkCode`. Cookies,
+headers, and account tokens never cross the native messaging boundary.
+
 See [docs/PRIVACY.md](docs/PRIVACY.md) for the full model.
 
 ## Current status
@@ -131,8 +144,9 @@ Voice Watch currently includes:
 - Rust desktop project structure with clean slices for state, settings, tray,
   native messaging, process detection, microphone activity detection, countdown
   logic, Roblox log parsing, and rejoin behavior.
-- Native messaging host mode with Chromium browser framing.
-- Manifest V3 browser extension that connects to the native host automatically.
+- Native messaging host mode for Chromium-based browsers and Firefox.
+- Manifest V3 browser extension that connects to the native host automatically
+  and uses browser-specific native-host manifests.
 - Real extension fetch to `https://voice.roblox.com/v1/settings` using
   `credentials: "include"` and no cookie permission.
 - Sanitized voice status conversion, including `bannedUntilMs`.
@@ -140,17 +154,22 @@ Voice Watch currently includes:
   status fetch.
 - Poll pause behavior while Roblox is using the microphone.
 - User-clicked auto-update flow from GitHub Releases.
+- Per-browser connector version checks with a user-clicked extension update
+  action and no automatic downgrade path.
 - Smart polling pause behavior when Roblox has been mic-quiet for more than 20
   seconds without a suspension.
 - Poll pause behavior while a known suspension countdown is still active.
+- Current-server presence checks only while a game is visible, throttled to once
+  per minute with a short-lived local user-ID cache.
 - Visible Roblox game-window detection so the lingering background client does
   not keep checks running after you leave a game.
 - Compact suspension HUD attached to the Roblox window, with a Rejoin button
   after VC is restored.
-- A tray menu and native dialog notification fallback for restore alerts.
+- A tray menu, compact native HUD, and local restore sound.
 - Native settings window for polling, HUD, startup, sound, and developer-mode
   preferences.
-- Startup launch enabled by default from the installer.
+- Startup launch enabled by default and governed by the saved app setting across
+  upgrades.
 - Development scripts for registering and unregistering the native messaging
   host.
 
@@ -164,7 +183,7 @@ needed for contributors.
 Contributor requirements:
 
 - Rust stable toolchain
-- A Chromium-based browser for extension development
+- A Chromium-based browser or Firefox for extension development
 - Inno Setup 6 for building the Windows installer
 
 Install Rust from <https://rustup.rs/> if `cargo` is not available.
@@ -178,12 +197,13 @@ cargo build --release
 Useful development commands:
 
 ```powershell
-cargo run -- --simulate-suspension 30
 cargo run -- --native-host
 cargo run -- --print-config-path
 ```
 
 The settings file is created under `%APPDATA%\Voice Watch\settings.json`.
+If that file is invalid, Voice Watch preserves it as
+`settings.invalid-<timestamp>-<pid>.json` and starts with validated defaults.
 
 ## Default settings
 
@@ -217,7 +237,7 @@ Set `developerMode` to `true` to show a tray-only **Test Suspend** button. It
 starts a local two-minute test suspension for checking the countdown and HUD,
 then disables while that suspension is active.
 
-## Load the extension in a Chromium-based browser
+## Load the browser extension
 
 For regular use, install Voice Watch, open the tray menu, and choose
 **Connect Roblox**. Voice Watch opens the bundled setup page only when the
@@ -238,6 +258,10 @@ For development:
 5. Choose **Load unpacked** and select the `extension/` folder.
 6. The extension opens a **Finish Voice Watch setup** tab.
 7. Choose **Finish setup** and allow Windows to open Voice Watch.
+
+The source `extension/` folder is the Chromium development build. For Firefox,
+use the generated `voice-watch-connector-firefox-<version>.zip`; the packaging
+script writes Firefox-specific background and add-on ID metadata.
 
 If the finish tab does not appear, open the Voice Watch extension icon in the
 browser toolbar and choose **Finish setup** there. The extension supplies its
@@ -295,15 +319,16 @@ when Mozilla asks for source code, and upload
 
 Rejoining is always user-clicked. Voice Watch never auto-rejoins.
 
-The app tries to infer the last Roblox place and server ID from local Roblox
-logs. This is best-effort:
+The extension detects the signed-in user's current server while a Roblox game
+is visible. Local Roblox logs are used only as a best-effort fallback:
 
-- If `placeId` and an exact join target are available, the rejoin action opens
-  Roblox's registered `roblox://` deep link directly.
+- If `placeId` and an exact join target are available, the desktop sends a
+  typed rejoin command to the connected extension. That browser opens a marked
+  Roblox game page and calls Roblox's page launcher for the exact server.
 - Public servers use `gameInstanceId`, also logged by Roblox as `GameId`.
 - Private servers can use `accessCode` or `linkCode` when Roblox logs them.
-- The browser extension can also detect the logged-in user's current Roblox
-  presence and pass the current `placeId`/`gameInstanceId` to the desktop app.
+- The local `roblox://` deep link remains a fallback if the desktop cannot queue
+  the browser command.
 - If only `placeId` is available, Voice Watch can identify the experience but
   cannot honestly claim an exact same-server rejoin, so the HUD disables the
   Rejoin button.
@@ -318,15 +343,15 @@ Roblox web launch metadata and maintains a fallback page launcher.
 src/
   app_state.rs         Voice state machine
   countdown.rs         Local anchored countdown math
-  ipc.rs               IPC bridge abstraction for the native host/tray link
+  ipc.rs               Persisted event and desktop-command bridge
   messages.rs          Shared sanitized protocol models
-  native_messaging.rs  Chromium native messaging framing
-  overlay.rs           Compact suspension HUD and restore notification adapter
+  native_messaging.rs  Browser native messaging framing and readiness logic
+  overlay.rs           Compact suspension/restored HUD and local sound
   process.rs           Roblox window and microphone activity detection
   rejoin.rs            Last-server rejoin targets
   roblox_logs.rs       Best-effort Roblox log parsing
   settings.rs          Local settings load/save/validation
-  tray.rs              Tray runtime and prototype menu
+  tray.rs              Tray runtime, menu, state wiring, and update prompts
 
 extension/
   icons/

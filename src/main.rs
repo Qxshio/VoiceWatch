@@ -42,15 +42,6 @@ fn main() -> Result<()> {
             println!("{}", settings::settings_path()?.display());
             Ok(())
         }
-        Some("--simulate-suspension") => {
-            let seconds = args
-                .next()
-                .as_deref()
-                .unwrap_or("30")
-                .parse::<u64>()
-                .context("expected seconds after --simulate-suspension")?;
-            tray::run_simulated_countdown(seconds)
-        }
         Some("--apply-update") => updates::run_update_helper_from_args(args.collect::<Vec<_>>()),
         Some("--help") | Some("-h") => {
             print_help();
@@ -76,17 +67,13 @@ fn run_normal_app() -> Result<()> {
 }
 
 fn is_browser_native_host_invocation(args: &[String]) -> bool {
-    args.iter()
-        .any(|arg| arg.starts_with("chrome-extension://"))
+    args.iter().any(|arg| {
+        arg.starts_with("chrome-extension://")
+            || arg == native_host_registration::FIREFOX_EXTENSION_ID
+    })
 }
 
 fn handle_protocol_url(url: &str) -> Result<()> {
-    if url.starts_with("voice-watch://open-extensions") {
-        let browser = browser_support::browser_from_protocol_url(url)?;
-        browser_support::open_extensions_page(browser)?;
-        return Ok(());
-    }
-
     match native_host_registration::register_from_protocol_url(url) {
         Ok(summary) => {
             show_message(
@@ -141,11 +128,9 @@ fn print_help() {
 \n\
 Usage:\n\
   voice-watch.exe                     Run the tray app\n\
-  voice-watch.exe --native-host        Run as a Chromium native messaging host\n\
-  voice-watch.exe --register-native-host <extension-id> [--browser all|chrome|edge|brave|vivaldi|opera|chromium]\n\
+  voice-watch.exe --native-host        Run as a browser native messaging host\n\
+  voice-watch.exe --register-native-host <extension-id> [--browser all|chrome|edge|brave|vivaldi|opera|chromium|firefox]\n\
                                        Register browser native messaging\n\
-  voice-watch.exe --simulate-suspension <seconds>\n\
-                                       Demo countdown and restore notification\n\
   voice-watch.exe --print-config-path  Print the settings file location\n"
     );
 }
@@ -179,5 +164,15 @@ mod tests {
         let args = vec!["--print-config-path".to_string()];
 
         assert!(!is_browser_native_host_invocation(&args));
+    }
+
+    #[test]
+    fn native_host_invocation_accepts_firefox_arguments() {
+        let args = vec![
+            r"C:\Users\Tommy\AppData\Local\VoiceWatch\native-messaging\com.voice_watch.native-firefox.json".to_string(),
+            native_host_registration::FIREFOX_EXTENSION_ID.to_string(),
+        ];
+
+        assert!(is_browser_native_host_invocation(&args));
     }
 }

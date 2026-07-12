@@ -1,5 +1,6 @@
 use anyhow::{anyhow, bail, Context, Result};
 use serde::Deserialize;
+use std::cmp::Ordering;
 use std::fs;
 use std::io;
 use std::io::Write;
@@ -20,8 +21,6 @@ const UPDATE_HELPER_EXE: &str = "voice-watch-handoff.exe";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpdateInfo {
     pub version: String,
-    pub tag_name: String,
-    pub release_url: String,
     pub installer_name: String,
     pub installer_url: String,
 }
@@ -36,7 +35,6 @@ pub enum UpdateEvent {
 #[derive(Debug, Clone, Deserialize)]
 struct GitHubRelease {
     tag_name: String,
-    html_url: String,
     draft: bool,
     assets: Vec<GitHubAsset>,
 }
@@ -74,6 +72,10 @@ pub fn check_for_update() -> Result<Option<UpdateInfo>> {
         env!("CARGO_PKG_VERSION"),
         installer_asset_name,
     ))
+}
+
+pub fn compare_versions(left: &str, right: &str) -> Option<Ordering> {
+    Some(ReleaseVersion::parse(left)?.cmp(&ReleaseVersion::parse(right)?))
 }
 
 pub fn download_and_launch_update(info: &UpdateInfo) -> Result<()> {
@@ -159,8 +161,6 @@ where
                 version,
                 UpdateInfo {
                     version: version_label,
-                    tag_name: release.tag_name,
-                    release_url: release.html_url,
                     installer_name: asset.name.clone(),
                     installer_url: asset.browser_download_url.clone(),
                 },
@@ -393,6 +393,14 @@ mod tests {
     }
 
     #[test]
+    fn compares_desktop_and_extension_versions_without_downgrading() {
+        assert_eq!(compare_versions("0.1.9", "0.1.10"), Some(Ordering::Less));
+        assert_eq!(compare_versions("0.1.10", "0.1.10"), Some(Ordering::Equal));
+        assert_eq!(compare_versions("0.2.0", "0.1.10"), Some(Ordering::Greater));
+        assert_eq!(compare_versions("unknown", "0.1.10"), None);
+    }
+
+    #[test]
     fn selects_highest_newer_release_with_matching_installer() {
         let selected = select_update(
             vec![
@@ -438,7 +446,6 @@ mod tests {
     fn release(tag_name: &str, draft: bool, assets: Vec<&str>) -> GitHubRelease {
         GitHubRelease {
             tag_name: tag_name.into(),
-            html_url: format!("https://github.com/Qxshio/VoiceWatch/releases/tag/{tag_name}"),
             draft,
             assets: assets
                 .into_iter()

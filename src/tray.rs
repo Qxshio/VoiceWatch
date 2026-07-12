@@ -2,7 +2,7 @@ use crate::app_state::{AppState, VoiceState};
 use crate::browser_support;
 use crate::countdown::{format_remaining, now_wall_clock_ms};
 use crate::ipc::{self, IpcEvent};
-use crate::messages::{VoiceStatusData, VoiceStatusEnvelope};
+use crate::messages::VoiceStatusEnvelope;
 use crate::overlay;
 use crate::rejoin;
 use crate::roblox_logs;
@@ -10,7 +10,7 @@ use crate::settings;
 use crate::settings_window;
 use crate::updates::{self, UpdateEvent, UpdateInfo};
 use anyhow::{Context, Result};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use tray_icon::{
     menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem},
     Icon, TrayIcon, TrayIconBuilder,
@@ -35,7 +35,14 @@ struct MenuShape {
     can_rejoin: bool,
     developer_mode: bool,
     can_test_suspend: bool,
+    extension_update_available: bool,
     update: UpdateMenuShape,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ExtensionUpdateTarget {
+    pid: u32,
+    version: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,6 +68,14 @@ enum TrayIconStyle {
     Updating,
 }
 
+#[derive(Debug, Default)]
+struct MenuLabels {
+    update: Option<String>,
+    status: Option<String>,
+    countdown: Option<String>,
+    last_checked: Option<String>,
+}
+
 const TEST_SUSPENSION_SECONDS: i64 = 120;
 const UPDATE_CHECK_INITIAL_DELAY: Duration = Duration::from_secs(20);
 const UPDATE_CHECK_RETRY_INTERVAL: Duration = Duration::from_secs(2 * 60);
@@ -69,6 +84,9 @@ const UPDATE_CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 
 pub fn run_tray_app() -> Result<()> {
     let settings = settings::load_settings().context("failed to load settings")?;
+    if let Err(error) = settings::apply_launch_on_startup(settings.launch_on_startup) {
+        eprintln!("Failed to apply startup preference: {error:#}");
+    }
     let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
     event_loop.set_control_flow(ControlFlow::Wait);
 
@@ -82,6 +100,9 @@ pub fn run_tray_app() -> Result<()> {
         let mut offset = ipc::event_log_len();
         loop {
             std::thread::sleep(Duration::from_millis(750));
+            if ipc::event_log_len() == offset {
+                continue;
+            }
             let Ok((new_offset, events)) = ipc::read_events_since(offset) else {
                 continue;
             };
@@ -128,46 +149,13 @@ pub fn run_tray_app() -> Result<()> {
     Ok(())
 }
 
-pub fn run_simulated_countdown(seconds: u64) -> Result<()> {
-    let banned_until_ms = now_wall_clock_ms() + (seconds as i64 * 1000);
-    let mut state = AppState::default();
-    state.apply_voice_status_data(
-        now_wall_clock_ms(),
-        VoiceStatusData {
-            is_voice_enabled: false,
-            is_user_opt_in: true,
-            is_user_eligible: false,
-            is_banned: true,
-            ban_reason: Some(7),
-            banned_until_ms: Some(banned_until_ms),
-            denial_reason: Some(6),
-        },
-    );
-
-    while let Some(countdown) = &state.countdown {
-        if countdown.is_expired() {
-            break;
-        }
-        println!("Countdown: {}", format_remaining(countdown.remaining()));
-        std::thread::sleep(Duration::from_secs(1));
-    }
-
-    state.mark_restored(now_wall_clock_ms());
-
-    let last_server = roblox_logs::detect_last_server_from_logs();
-    if matches!(state.voice_state, VoiceState::Restored { .. }) {
-        overlay::play_restore_sound();
-        overlay::show_restored_overlay(last_server.as_ref())?;
-    }
-
-    Ok(())
-}
-
 struct TrayApp {
     proxy: EventLoopProxy<UserEvent>,
     settings: settings::Settings,
+    settings_modified_at: Option<SystemTime>,
     state: AppState,
     update_state: UpdateTrayState,
+    extension_update_targets: Vec<ExtensionUpdateTarget>,
     hud: overlay::SuspensionHud,
     last_server: Option<rejoin::LastServer>,
     test_suspension_until_ms: Option<i64>,
@@ -178,22 +166,34 @@ struct TrayApp {
     status_item: Option<MenuItem>,
     countdown_item: Option<MenuItem>,
     last_checked_item: Option<MenuItem>,
+    menu_labels: MenuLabels,
     menu_shape: Option<MenuShape>,
 }
 
 impl TrayApp {
     fn new(settings: settings::Settings, proxy: EventLoopProxy<UserEvent>) -> Self {
         let mut state = AppState::default();
-        if ipc::read_extension_connection_state().is_some_and(|state| state.is_connected()) {
+        let extension_connection = ipc::read_extension_connection_state();
+        if extension_connection
+            .as_ref()
+            .is_some_and(ipc::ExtensionConnectionState::is_connected)
+        {
             state.mark_connected();
+            if let Some(envelope) = ipc::read_voice_status() {
+                state.apply_voice_status(envelope);
+            }
         }
+        let extension_update_targets =
+            find_extension_update_targets(extension_connection.as_ref(), env!("CARGO_PKG_VERSION"));
         let setup_opened_on_startup = state.is_browser_connected();
 
         Self {
             proxy,
             settings,
+            settings_modified_at: settings::modified_at(),
             state,
             update_state: UpdateTrayState::Idle,
+            extension_update_targets,
             hud: overlay::SuspensionHud::default(),
             last_server: ipc::read_last_server(),
             test_suspension_until_ms: None,
@@ -204,6 +204,7 @@ impl TrayApp {
             status_item: None,
             countdown_item: None,
             last_checked_item: None,
+            menu_labels: MenuLabels::default(),
             menu_shape: None,
         }
     }
@@ -236,6 +237,7 @@ impl TrayApp {
                 .is_some_and(rejoin::LastServer::can_rejoin_exact),
             developer_mode: self.settings.developer_mode,
             can_test_suspend: self.can_test_suspend(),
+            extension_update_available: !self.extension_update_targets.is_empty(),
             update: self.update_state.menu_shape(),
         }
     }
@@ -243,12 +245,13 @@ impl TrayApp {
     fn can_test_suspend(&self) -> bool {
         !matches!(
             self.state.voice_state,
-            VoiceState::TempSuspended { .. } | VoiceState::SuspendedUnknownDuration { .. }
+            VoiceState::TempSuspended | VoiceState::SuspendedUnknownDuration
         )
     }
 
     fn create_menu(&mut self, shape: MenuShape) -> Result<Menu> {
         let menu = Menu::new();
+        self.menu_labels = MenuLabels::default();
 
         let title = MenuItem::with_id("title", "Voice Watch", false, None);
         let status = MenuItem::with_id("status", "Status: Disconnected", false, None);
@@ -261,6 +264,11 @@ impl TrayApp {
         menu.append(&PredefinedMenuItem::separator())?;
 
         self.update_item = None;
+        if shape.extension_update_available {
+            let update_extension =
+                MenuItem::with_id("update_extension", "Update extension", true, None);
+            menu.append(&update_extension)?;
+        }
         if shape.update != UpdateMenuShape::Hidden {
             let update = MenuItem::with_id(
                 "update",
@@ -269,8 +277,10 @@ impl TrayApp {
                 None,
             );
             menu.append(&update)?;
-            menu.append(&PredefinedMenuItem::separator())?;
             self.update_item = Some(update);
+        }
+        if shape.extension_update_available || shape.update != UpdateMenuShape::Hidden {
+            menu.append(&PredefinedMenuItem::separator())?;
         }
 
         menu.append(&status)?;
@@ -334,35 +344,41 @@ impl TrayApp {
         self.refresh_hud();
     }
 
-    fn refresh_menu_labels(&self) {
-        if let Some(item) = &self.update_item {
-            item.set_text(self.update_state.menu_label());
-            item.set_enabled(!matches!(self.update_state, UpdateTrayState::Installing(_)));
-        }
+    fn refresh_menu_labels(&mut self) {
+        update_menu_label(
+            self.update_item.as_ref(),
+            &mut self.menu_labels.update,
+            self.update_state.menu_label(),
+        );
+        update_menu_label(
+            self.status_item.as_ref(),
+            &mut self.menu_labels.status,
+            format!("Status: {}", self.state.voice_state.label()),
+        );
 
-        if let Some(item) = &self.status_item {
-            item.set_text(format!("Status: {}", self.state.voice_state.label()));
-        }
+        let countdown = self
+            .state
+            .countdown
+            .as_ref()
+            .map(|countdown| format_remaining(countdown.remaining()))
+            .unwrap_or_else(|| "--".into());
+        update_menu_label(
+            self.countdown_item.as_ref(),
+            &mut self.menu_labels.countdown,
+            format!("Countdown: {countdown}"),
+        );
 
-        if let Some(item) = &self.countdown_item {
-            let text = self
-                .state
-                .countdown
-                .as_ref()
-                .map(|countdown| format_remaining(countdown.remaining()))
-                .unwrap_or_else(|| "--".into());
-            item.set_text(format!("Countdown: {text}"));
-        }
-
-        if let Some(item) = &self.last_checked_item {
-            let now_ms = now_wall_clock_ms();
-            let text = self
-                .state
-                .last_checked_at_ms
-                .map(|value| format_relative_time(value, now_ms))
-                .unwrap_or_else(|| "--".into());
-            item.set_text(format!("Last checked: {text}"));
-        }
+        let now_ms = now_wall_clock_ms();
+        let last_checked = self
+            .state
+            .last_checked_at_ms
+            .map(|value| format_relative_time(value, now_ms))
+            .unwrap_or_else(|| "--".into());
+        update_menu_label(
+            self.last_checked_item.as_ref(),
+            &mut self.menu_labels.last_checked,
+            format!("Last checked: {last_checked}"),
+        );
     }
 
     fn handle_menu(&mut self, event_loop: &ActiveEventLoop, event: MenuEvent) {
@@ -385,8 +401,11 @@ impl TrayApp {
                     .as_ref()
                     .filter(|server| server.can_rejoin_exact())
                 {
-                    if let Err(error) = rejoin::open_rejoin_target(server) {
-                        eprintln!("Failed to rejoin the last server: {error:#}");
+                    if let Err(command_error) = ipc::request_rejoin(server) {
+                        eprintln!("Failed to send rejoin to the browser: {command_error:#}");
+                        if let Err(error) = rejoin::open_rejoin_target(server) {
+                            eprintln!("Failed to rejoin the last server: {error:#}");
+                        }
                     }
                 }
             }
@@ -397,9 +416,7 @@ impl TrayApp {
                 if self.can_test_suspend() {
                     let now_ms = now_wall_clock_ms();
                     let banned_until_ms = now_ms + TEST_SUSPENSION_SECONDS * 1000;
-                    if let Some(server) = roblox_logs::detect_last_server_from_logs() {
-                        self.remember_last_server(server);
-                    }
+                    self.refresh_last_server_from_logs();
                     self.test_suspension_until_ms = Some(banned_until_ms);
                     self.state.mark_test_suspended(now_ms, banned_until_ms);
                     self.refresh_tray();
@@ -408,19 +425,30 @@ impl TrayApp {
             "settings" => {
                 let _ = settings_window::open();
             }
+            "update_extension" => self.request_extension_updates(),
             "update" => self.start_update_install(),
             _ => {}
         }
     }
 
     fn handle_ipc(&mut self, event: IpcEvent) {
+        let connection_changed = matches!(
+            &event,
+            IpcEvent::ExtensionConnected { .. } | IpcEvent::ExtensionDisconnected { .. }
+        );
         match event {
             IpcEvent::ExtensionConnected { .. } => {
                 self.state.mark_connected();
             }
-            IpcEvent::ExtensionDisconnected { .. } => {
-                self.test_suspension_until_ms = None;
-                self.state.mark_disconnected();
+            IpcEvent::ExtensionDisconnected {
+                still_connected, ..
+            } => {
+                if still_connected {
+                    self.state.mark_connected();
+                } else {
+                    self.test_suspension_until_ms = None;
+                    self.state.mark_disconnected();
+                }
             }
             IpcEvent::LastServer { server, .. } => {
                 self.remember_last_server(server);
@@ -436,12 +464,15 @@ impl TrayApp {
                     return;
                 }
                 self.test_suspension_until_ms = None;
-                let was_restored = matches!(self.state.voice_state, VoiceState::Restored { .. });
+                let was_restored = matches!(self.state.voice_state, VoiceState::Restored);
                 self.state.apply_voice_status(envelope);
-                if matches!(self.state.voice_state, VoiceState::Restored { .. }) && !was_restored {
+                if matches!(self.state.voice_state, VoiceState::Restored) && !was_restored {
                     self.announce_restored();
                 }
             }
+        }
+        if connection_changed {
+            self.refresh_extension_update_targets();
         }
         self.refresh_tray();
     }
@@ -467,7 +498,7 @@ impl TrayApp {
     fn handle_tick(&mut self) {
         self.reload_settings();
 
-        if matches!(self.state.voice_state, VoiceState::TempSuspended { .. })
+        if matches!(self.state.voice_state, VoiceState::TempSuspended)
             && self
                 .state
                 .countdown
@@ -475,7 +506,7 @@ impl TrayApp {
                 .is_some_and(|countdown| countdown.is_expired())
         {
             self.test_suspension_until_ms = None;
-            self.state.mark_restored(now_wall_clock_ms());
+            self.state.mark_restored();
             self.announce_restored();
         }
 
@@ -514,8 +545,30 @@ impl TrayApp {
         });
     }
 
+    fn request_extension_updates(&mut self) {
+        let desktop_version = env!("CARGO_PKG_VERSION");
+        for target in &self.extension_update_targets {
+            if let Err(error) = ipc::request_extension_update(target.pid, desktop_version) {
+                eprintln!(
+                    "Failed to request browser extension update from host {}: {error:#}",
+                    target.pid
+                );
+            }
+        }
+
+        if let Some(target) = self.extension_update_targets.first() {
+            if let Err(error) = open_extension_update_page(&target.version) {
+                eprintln!("Failed to open browser extension update help: {error:#}");
+            }
+        }
+    }
+
     fn refresh_tray_icon(&mut self) {
-        let style = self.update_state.icon_style();
+        let extension_update_available = !self.extension_update_targets.is_empty();
+        let style = match self.update_state.icon_style() {
+            TrayIconStyle::Normal if extension_update_available => TrayIconStyle::UpdateAvailable,
+            style => style,
+        };
         if self.tray_icon_style == Some(style) {
             return;
         }
@@ -525,6 +578,12 @@ impl TrayApp {
                 let _ = tray_icon.set_icon(Some(icon));
             }
             let tooltip = match &self.update_state {
+                UpdateTrayState::Available(info) if extension_update_available => {
+                    format!(
+                        "Voice Watch - Desktop update {} and extension update available",
+                        info.version
+                    )
+                }
                 UpdateTrayState::Available(info) => {
                     format!("Voice Watch - Update {} available", info.version)
                 }
@@ -534,6 +593,9 @@ impl TrayApp {
                 UpdateTrayState::Failed { message, .. } => {
                     format!("Voice Watch - Update failed: {message}")
                 }
+                UpdateTrayState::Idle if extension_update_available => {
+                    "Voice Watch - Browser extension update required".into()
+                }
                 UpdateTrayState::Idle => "Voice Watch".into(),
             };
             let _ = tray_icon.set_tooltip(Some(tooltip));
@@ -542,16 +604,26 @@ impl TrayApp {
         self.tray_icon_style = Some(style);
     }
 
+    fn refresh_extension_update_targets(&mut self) {
+        let connection = ipc::read_extension_connection_state();
+        self.extension_update_targets =
+            find_extension_update_targets(connection.as_ref(), env!("CARGO_PKG_VERSION"));
+    }
+
     fn reload_settings(&mut self) {
+        let modified_at = settings::modified_at();
+        if modified_at == self.settings_modified_at {
+            return;
+        }
+
         if let Ok(settings) = settings::load_settings() {
             self.settings = settings;
+            self.settings_modified_at = settings::modified_at();
         }
     }
 
     fn announce_restored(&mut self) {
-        if let Some(server) = roblox_logs::detect_last_server_from_logs() {
-            self.remember_last_server(server);
-        }
+        self.refresh_last_server_from_logs();
 
         if self.state.restored_overlay_shown {
             return;
@@ -575,6 +647,19 @@ impl TrayApp {
         }
     }
 
+    fn refresh_last_server_from_logs(&mut self) {
+        if self
+            .last_server
+            .as_ref()
+            .is_some_and(rejoin::LastServer::can_rejoin_exact)
+        {
+            return;
+        }
+        if let Some(server) = roblox_logs::detect_last_server_from_logs() {
+            self.remember_last_server(server);
+        }
+    }
+
     fn refresh_hud(&mut self) {
         if !self.settings.show_overlay {
             self.hud.hide();
@@ -582,7 +667,7 @@ impl TrayApp {
         }
 
         match &self.state.voice_state {
-            VoiceState::TempSuspended { .. } => {
+            VoiceState::TempSuspended => {
                 let remaining = self
                     .state
                     .countdown
@@ -591,15 +676,50 @@ impl TrayApp {
                     .unwrap_or_else(|| "--".into());
                 self.hud.show_suspended(remaining);
             }
-            VoiceState::SuspendedUnknownDuration { .. } => {
+            VoiceState::SuspendedUnknownDuration => {
                 self.hud.show_suspended("unknown".into());
             }
-            VoiceState::Restored { .. } => {
+            VoiceState::Restored => {
                 self.hud.show_restored(self.last_server.clone());
             }
             _ => self.hud.hide(),
         }
     }
+}
+
+fn update_menu_label(item: Option<&MenuItem>, rendered: &mut Option<String>, text: String) {
+    let Some(item) = item else {
+        *rendered = None;
+        return;
+    };
+    if rendered.as_deref() == Some(text.as_str()) {
+        return;
+    }
+
+    item.set_text(&text);
+    *rendered = Some(text);
+}
+
+fn find_extension_update_targets(
+    connection: Option<&ipc::ExtensionConnectionState>,
+    desktop_version: &str,
+) -> Vec<ExtensionUpdateTarget> {
+    let Some(connection) = connection else {
+        return Vec::new();
+    };
+
+    connection
+        .active_hosts
+        .iter()
+        .filter_map(|host| {
+            let version = host.extension_version.as_deref()?;
+            (updates::compare_versions(version, desktop_version) == Some(std::cmp::Ordering::Less))
+                .then(|| ExtensionUpdateTarget {
+                    pid: host.pid,
+                    version: version.to_string(),
+                })
+        })
+        .collect()
 }
 
 impl ApplicationHandler<UserEvent> for TrayApp {
@@ -636,7 +756,18 @@ fn open_setup_page(is_connected: bool) -> Result<()> {
 
     let path = extension_setup_page()?;
     let query = browser_support::setup_query(is_connected);
-    let url = format!("{}?{query}", file_url(&path));
+    open_setup_page_with_query(&path, &query)
+}
+
+fn open_extension_update_page(extension_version: &str) -> Result<()> {
+    let path = extension_setup_page()?;
+    let query =
+        browser_support::extension_update_query(env!("CARGO_PKG_VERSION"), extension_version);
+    open_setup_page_with_query(&path, &query)
+}
+
+fn open_setup_page_with_query(path: &std::path::Path, query: &str) -> Result<()> {
+    let url = format!("{}?{query}", file_url(path));
     open::that(url).context("failed to open browser connector setup")
 }
 
@@ -809,6 +940,7 @@ fn make_icon(style: TrayIconStyle) -> Result<Icon> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::messages::VoiceStatusData;
 
     #[test]
     fn relative_time_is_human_readable() {
@@ -875,6 +1007,41 @@ mod tests {
             UPDATE_CHECK_INTERVAL
         );
         assert_eq!(misses, 0);
+    }
+
+    #[test]
+    fn extension_updates_target_only_older_connected_versions() {
+        let connection = ipc::ExtensionConnectionState {
+            version: 2,
+            last_connected_at_ms: 1_000,
+            last_disconnected_at_ms: None,
+            active_host_pids: vec![1, 2, 3],
+            active_hosts: vec![
+                ipc::ExtensionHostState {
+                    pid: 1,
+                    connected_at_ms: 1_000,
+                    extension_version: Some("0.1.9".into()),
+                },
+                ipc::ExtensionHostState {
+                    pid: 2,
+                    connected_at_ms: 1_000,
+                    extension_version: Some("0.1.10".into()),
+                },
+                ipc::ExtensionHostState {
+                    pid: 3,
+                    connected_at_ms: 1_000,
+                    extension_version: Some("0.2.0".into()),
+                },
+            ],
+        };
+
+        assert_eq!(
+            find_extension_update_targets(Some(&connection), "0.1.10"),
+            vec![ExtensionUpdateTarget {
+                pid: 1,
+                version: "0.1.9".into(),
+            }]
+        );
     }
 
     fn voice_status(is_banned: bool) -> VoiceStatusEnvelope {

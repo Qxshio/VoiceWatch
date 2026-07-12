@@ -1,7 +1,7 @@
 # Native Messaging
 
-Voice Watch uses Chromium native messaging to connect the browser extension to
-the local desktop app.
+Voice Watch uses browser native messaging to connect Chromium-based browsers
+and Firefox to the local desktop app.
 
 ## Host name
 
@@ -23,24 +23,32 @@ cargo build --release
 .\scripts\register-native-host.ps1 -ExtensionId "your-extension-id" -Browser All
 ```
 
-The script writes a native messaging manifest under:
+Chromium registration writes:
 
 ```text
 %LOCALAPPDATA%\VoiceWatch\native-messaging\com.voice_watch.native.json
 ```
 
-It then registers that manifest under the current user's supported Chromium
-browser registry keys.
+Firefox registration writes a separate manifest because Firefox uses
+`allowed_extensions` rather than Chromium's `allowed_origins`:
+
+```text
+%LOCALAPPDATA%\VoiceWatch\native-messaging\com.voice_watch.native-firefox.json
+```
+
+The manifests are registered under current-user browser keys. Firefox uses
+`HKCU\Software\Mozilla\NativeMessagingHosts\com.voice_watch.native`; Chromium
+forks use their corresponding `NativeMessagingHosts` keys.
 
 Opera is also registered through the Chrome-compatible native messaging key.
 Opera's Windows native messaging documentation points to the Chrome registry
 location, so Voice Watch writes both that key and the Opera-specific key for
 compatibility. Opera GX also gets an Opera GX-specific fallback registry key.
 
-The browser starts the executable listed in the manifest and passes the calling
-extension origin as the first argument, for example
-`chrome-extension://<extension-id>`. Voice Watch treats that argument as native
-host mode. The explicit `--native-host` flag is still available for manual
+Chromium starts the executable with the calling `chrome-extension://` origin.
+Firefox passes the manifest path and the fixed Voice Watch add-on ID. Voice
+Watch recognizes both invocation shapes before processing normal desktop
+arguments. The explicit `--native-host` flag remains available for manual
 testing.
 
 ## Protocol
@@ -50,7 +58,7 @@ Extension to host:
 ```json
 {
   "type": "hello",
-  "extensionVersion": "0.1.6",
+  "extensionVersion": "0.1.11",
   "protocolVersion": 1
 }
 ```
@@ -60,7 +68,7 @@ Host to extension:
 ```json
 {
   "type": "hello_ack",
-  "appVersion": "0.1.6",
+  "appVersion": "0.1.11",
   "protocolVersion": 1,
   "pollIntervalSeconds": 10
 }
@@ -99,7 +107,7 @@ polling enabled, it also returns false after Roblox has been mic-quiet for more
 than 20 seconds and the last successful Roblox status said the user was not
 suspended.
 
-Legacy app request to extension:
+Manual app request to extension:
 
 ```json
 {
@@ -130,6 +138,43 @@ Extension response:
 
 Errors use the same `voice_status` envelope with `ok: false`.
 
+User-clicked rejoin command from the desktop:
+
+```json
+{
+  "type": "rejoin",
+  "server": {
+    "placeId": 123,
+    "gameInstanceId": "1bb8dd1d-ad4c-43d2-a9c6-63feee836e43",
+    "accessCode": null,
+    "linkCode": null,
+    "detectedAtMs": 1783548000000
+  }
+}
+```
+
+The extension opens the marked Roblox rejoin page in the same browser that owns
+the native connection. Rejoin is never sent without a user click.
+
+When the handshake reports a connector version older than the desktop app, the
+tray exposes a user-clicked extension update command targeted to that browser's
+native-host process:
+
+```json
+{
+  "type": "update_extension",
+  "desktopVersion": "0.1.11"
+}
+```
+
+On Chromium browsers, the connector performs one browser-managed update check.
+If no packaged update is available, it reloads itself so an unpacked connector
+reads the files already updated by the Voice Watch installer. Firefox does not
+provide Chromium's manual update-check API, so its connector reloads and relies
+on Firefox's normal add-on updater. `runtime.onUpdateAvailable` reloads a store
+connector once a new package is ready. Voice Watch does not run an extension
+update timer, and a connector newer than the desktop app is never downgraded.
+
 Intentional extension disconnect:
 
 ```json
@@ -140,9 +185,19 @@ Intentional extension disconnect:
 
 ## Frame format
 
-Chromium native messaging frames are:
+Browser native messaging frames are:
 
 1. Four-byte little-endian unsigned payload length.
 2. UTF-8 JSON payload.
 
 `src/native_messaging.rs` caps frames at 1 MiB.
+
+## Tray bridge
+
+Browser native-host mode and the tray app are separate processes. `src/ipc.rs`
+connects them with a bounded JSONL event log plus atomic shared and per-host
+desktop-command files under `%APPDATA%\Voice Watch`. Each live-host marker keeps
+its process ID, connection time, and sanitized connector version. The last
+sanitized voice status and last server are persisted separately so tray restarts
+retain countdowns and do not mistake one browser disconnect for all browsers
+disconnecting.

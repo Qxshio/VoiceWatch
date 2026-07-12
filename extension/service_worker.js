@@ -3,7 +3,8 @@ const PROTOCOL_VERSION = 1;
 const VOICE_SETTINGS_URL = "https://voice.roblox.com/v1/settings";
 const AUTHENTICATED_USER_URL = "https://users.roblox.com/v1/users/authenticated";
 const PRESENCE_URL = "https://presence.roblox.com/v1/presence/users";
-const PRESENCE_REFRESH_MS = 15000;
+const PRESENCE_REFRESH_MS = 60000;
+const AUTHENTICATED_USER_CACHE_MS = 5 * 60 * 1000;
 
 let nativePort = null;
 let nativeStatus = {
@@ -24,12 +25,13 @@ let connectionAttempt = null;
 let pollReadinessWaiters = new Map();
 let pollTimer = null;
 let pollInFlight = false;
-let presenceTimer = null;
 let intentionalDisconnectPort = null;
 let manuallyDisconnected = false;
 let lastServer = null;
-let currentUserId = null;
+let currentUserId;
+let authenticatedUserCheckedAtMs = 0;
 let lastPresenceRefreshAtMs = 0;
+let persistence = Promise.resolve();
 
 const statusHydration = chrome.storage.local
   .get(["nativeStatus", "lastVoiceStatus", "manuallyDisconnected", "lastServer"])
@@ -63,6 +65,10 @@ chrome.runtime.onStartup.addListener(() => {
   });
 });
 
+chrome.runtime.onUpdateAvailable?.addListener(() => {
+  chrome.runtime.reload();
+});
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   handleRuntimeMessage(message)
     .then(sendResponse)
@@ -89,7 +95,6 @@ async function handleRuntimeMessage(message) {
       const connection = manuallyDisconnected
         ? { ok: false, nativeStatus }
         : await connectNative();
-      refreshCurrentPresence(false).catch(() => {});
       return {
         ok: connection.ok,
         nativeStatus,
@@ -115,7 +120,16 @@ async function ensureStatusHydrated() {
 }
 
 function persistStatus() {
-  return chrome.storage.local.set({ nativeStatus, lastVoiceStatus, manuallyDisconnected, lastServer });
+  const snapshot = {
+    nativeStatus: { ...nativeStatus },
+    lastVoiceStatus,
+    manuallyDisconnected,
+    lastServer
+  };
+  persistence = persistence
+    .catch(() => {})
+    .then(() => chrome.storage.local.set(snapshot));
+  return persistence;
 }
 
 function openSetupPage() {
@@ -229,7 +243,6 @@ async function reconnectNative() {
 
 async function disconnectNative() {
   stopPolling();
-  stopPresenceRefresh();
 
   manuallyDisconnected = true;
   nativeStatus = {
@@ -305,7 +318,9 @@ function handleNativeMessage(port, message) {
     if (lastServer) {
       postNative({ type: "last_server", server: lastServer });
     }
-    startPresenceRefresh(true);
+    if (lastVoiceStatus) {
+      postNative(lastVoiceStatus);
+    }
     startPolling(true);
     return;
   }
@@ -313,6 +328,30 @@ function handleNativeMessage(port, message) {
   if (message?.type === "poll_readiness") {
     rememberPollReadiness(message);
     resolvePollReadiness(message);
+    return;
+  }
+
+  if (message?.type === "error") {
+    nativeStatus = {
+      ...nativeStatus,
+      connecting: false,
+      connected: false,
+      lastError: message.message || "The desktop app rejected the connection."
+    };
+    persistStatus();
+    finishConnectionAttempt(port, {
+      ok: false,
+      nativeStatus,
+      manuallyDisconnected
+    });
+    if (nativePort === port) {
+      nativePort = null;
+    }
+    try {
+      port.disconnect();
+    } catch (_error) {
+      // The desktop may already have closed a rejected connection.
+    }
     return;
   }
 
@@ -325,7 +364,38 @@ function handleNativeMessage(port, message) {
         rememberVoiceStatus(envelope);
         postNative(envelope);
       });
+    return;
   }
+
+  if (message?.type === "rejoin") {
+    openRejoinInBrowser(message.server).catch((error) => {
+      console.warn("[Voice Watch] Could not open the browser rejoin page.", error);
+    });
+    return;
+  }
+
+  if (message?.type === "update_extension") {
+    requestExtensionUpdate().catch((error) => {
+      console.warn("[Voice Watch] Could not request an extension update.", error);
+    });
+  }
+}
+
+async function requestExtensionUpdate() {
+  // Firefox does not implement Chromium's manual store-update check.
+  const requestUpdateCheck = Reflect.get(chrome.runtime, "requestUpdateCheck");
+  if (typeof requestUpdateCheck === "function") {
+    try {
+      const result = await Reflect.apply(requestUpdateCheck, chrome.runtime, []);
+      if (result?.status === "update_available") {
+        return;
+      }
+    } catch (_error) {
+      // Unpacked and some Firefox builds do not expose a store update check.
+    }
+  }
+
+  chrome.runtime.reload();
 }
 
 function handleNativeDisconnect(port) {
@@ -340,7 +410,6 @@ function handleNativeDisconnect(port) {
   }
 
   stopPolling();
-  stopPresenceRefresh();
   resolvePollReadinessWaiters({
     shouldPoll: false,
     reason: "desktop_disconnected",
@@ -413,23 +482,6 @@ function stopPolling() {
   }
 }
 
-function startPresenceRefresh(immediate) {
-  stopPresenceRefresh();
-  if (immediate) {
-    refreshCurrentPresence(true).catch(() => {});
-  }
-  presenceTimer = setInterval(() => {
-    refreshCurrentPresence(false).catch(() => {});
-  }, PRESENCE_REFRESH_MS);
-}
-
-function stopPresenceRefresh() {
-  if (presenceTimer) {
-    clearInterval(presenceTimer);
-    presenceTimer = null;
-  }
-}
-
 function scheduleNextPoll(delayMs = pollIntervalMs()) {
   if (!nativeStatus.connected) {
     return;
@@ -476,9 +528,9 @@ function requestPollReadiness() {
       pollReadinessWaiters.delete(requestId);
       resolve({
         requestId,
-        shouldPoll: true,
-        reason: null,
-        message: null
+        shouldPoll: false,
+        reason: "readiness_timeout",
+        message: "Desktop readiness check timed out."
       });
     }, 1500);
 
@@ -494,16 +546,16 @@ function requestPollReadiness() {
       pollReadinessWaiters.delete(requestId);
       resolve({
         requestId,
-        shouldPoll: true,
-        reason: null,
-        message: null
+        shouldPoll: false,
+        reason: "readiness_unavailable",
+        message: "Desktop readiness check was unavailable."
       });
     }
   });
 }
 
 function rememberPollReadiness(message) {
-  nativeStatus = {
+  const nextStatus = {
     ...nativeStatus,
     pollIntervalSeconds: message.pollIntervalSeconds ?? nativeStatus.pollIntervalSeconds,
     pollPausedReason: message.shouldPoll ? null : message.reason || "paused",
@@ -512,7 +564,14 @@ function rememberPollReadiness(message) {
     robloxPlaying: Boolean(message.robloxPlaying),
     microphoneActive: Boolean(message.microphoneActive)
   };
-  persistStatus();
+  const changed = !shallowEqual(nativeStatus, nextStatus);
+  nativeStatus = nextStatus;
+  if (changed) {
+    persistStatus();
+  }
+  if (nativeStatus.robloxPlaying) {
+    refreshCurrentPresence(false).catch(() => {});
+  }
 }
 
 function resolvePollReadiness(message) {
@@ -541,7 +600,14 @@ function pollIntervalMs() {
 
 function nextPollDelayMs(requestedDelayMs) {
   const suspensionDelay = suspensionPauseDelayMs();
-  return suspensionDelay === null ? requestedDelayMs : suspensionDelay;
+  if (suspensionDelay !== null) {
+    return suspensionDelay;
+  }
+
+  const rateLimitDelay = rateLimitPauseDelayMs();
+  return rateLimitDelay === null
+    ? requestedDelayMs
+    : Math.max(requestedDelayMs, rateLimitDelay);
 }
 
 function suspensionPauseDelayMs() {
@@ -558,10 +624,25 @@ function suspensionPauseDelayMs() {
   return Math.max(1000, remainingMs + 1000);
 }
 
+function rateLimitPauseDelayMs() {
+  if (lastVoiceStatus?.ok || lastVoiceStatus?.error?.kind !== "rate_limited") {
+    return null;
+  }
+
+  const retryAfterMs = Number(lastVoiceStatus.error.retryAfterMs);
+  const checkedAt = Number(lastVoiceStatus.checkedAt);
+  if (!Number.isFinite(retryAfterMs) || !Number.isFinite(checkedAt)) {
+    return null;
+  }
+
+  const remainingMs = checkedAt + retryAfterMs - Date.now();
+  return remainingMs > 0 ? remainingMs + 1000 : null;
+}
+
 async function rememberVoiceStatus(envelope) {
   lastVoiceStatus = envelope;
   await persistStatus();
-  if (envelope?.ok && envelope.data?.isBanned) {
+  if (envelope?.ok && envelope.data?.isBanned && nativeStatus.robloxPlaying) {
     refreshCurrentPresence(true).catch(() => {});
   }
   return envelope;
@@ -573,9 +654,15 @@ async function rememberLastServer(server) {
     return { ok: false, error: "Server metadata was incomplete.", nativeStatus, lastVoiceStatus, lastServer };
   }
 
-  if (!lastServer || normalized.detectedAtMs >= (Number(lastServer.detectedAtMs) || 0)) {
-    lastServer = normalized;
+  if (lastServer && sameServer(lastServer, normalized)) {
+    return { ok: true, nativeStatus, lastVoiceStatus, lastServer };
   }
+
+  if (lastServer && normalized.detectedAtMs < (Number(lastServer.detectedAtMs) || 0)) {
+    return { ok: true, nativeStatus, lastVoiceStatus, lastServer };
+  }
+
+  lastServer = normalized;
   await persistStatus();
   postNative({ type: "last_server", server: lastServer });
   return { ok: true, nativeStatus, lastVoiceStatus, lastServer };
@@ -645,6 +732,14 @@ function fetchPresenceWithHeaders(userId, extraHeaders) {
 }
 
 async function authenticatedUserId() {
+  const now = Date.now();
+  if (
+    currentUserId !== undefined &&
+    now - authenticatedUserCheckedAtMs < AUTHENTICATED_USER_CACHE_MS
+  ) {
+    return currentUserId;
+  }
+
   let response;
   try {
     response = await fetch(AUTHENTICATED_USER_URL, {
@@ -659,6 +754,7 @@ async function authenticatedUserId() {
   }
   if (response.status === 401 || response.status === 403) {
     currentUserId = null;
+    authenticatedUserCheckedAtMs = now;
     return null;
   }
   if (!response.ok) {
@@ -669,6 +765,7 @@ async function authenticatedUserId() {
   const id = optionalInteger(body?.id);
   if (id) {
     currentUserId = id;
+    authenticatedUserCheckedAtMs = now;
     if (nativeStatus.robloxLoggedIn !== true) {
       nativeStatus = { ...nativeStatus, robloxLoggedIn: true };
       await persistStatus();
@@ -686,7 +783,6 @@ async function rememberLoggedOut() {
   );
   await rememberVoiceStatus(envelope);
   postNative(envelope);
-  return persistStatus();
 }
 
 function serverFromPresence(presence) {
@@ -719,6 +815,44 @@ function normalizeServer(server) {
     linkCode,
     detectedAtMs: optionalInteger(server?.detectedAtMs) || Date.now()
   };
+}
+
+async function openRejoinInBrowser(server) {
+  const normalized = normalizeServer(server);
+  if (!normalized) {
+    throw new Error("Exact server metadata is unavailable.");
+  }
+
+  const query = new URLSearchParams({
+    voiceWatchRejoin: "1",
+    placeId: String(normalized.placeId)
+  });
+  if (normalized.gameInstanceId) {
+    query.set("gameInstanceId", normalized.gameInstanceId);
+  }
+  if (normalized.accessCode) {
+    query.set("accessCode", normalized.accessCode);
+  }
+  if (normalized.linkCode) {
+    query.set("linkCode", normalized.linkCode);
+  }
+
+  await chrome.tabs.create({
+    url: `https://www.roblox.com/games/${normalized.placeId}/Voice-Watch?${query.toString()}`
+  });
+}
+
+function sameServer(left, right) {
+  return left.placeId === right.placeId &&
+    (left.gameInstanceId || null) === (right.gameInstanceId || null) &&
+    (left.accessCode || null) === (right.accessCode || null) &&
+    (left.linkCode || null) === (right.linkCode || null);
+}
+
+function shallowEqual(left, right) {
+  const keys = Object.keys(right);
+  return keys.length === Object.keys(left).length &&
+    keys.every((key) => left[key] === right[key]);
 }
 
 function optionalInteger(value) {
@@ -793,8 +927,8 @@ async function fetchVoiceStatus(requestId) {
 
   if (response.status === 401 || response.status === 403) {
     currentUserId = null;
+    authenticatedUserCheckedAtMs = checkedAt;
     nativeStatus = { ...nativeStatus, robloxLoggedIn: false };
-    await persistStatus();
     return errorEnvelope(
       requestId,
       "auth_error",
@@ -823,8 +957,12 @@ async function fetchVoiceStatus(requestId) {
   }
 
   if (nativeStatus.robloxLoggedIn !== true) {
+    if (currentUserId === null) {
+      currentUserId = undefined;
+      authenticatedUserCheckedAtMs = 0;
+      lastPresenceRefreshAtMs = 0;
+    }
     nativeStatus = { ...nativeStatus, robloxLoggedIn: true };
-    await persistStatus();
   }
 
   let body;

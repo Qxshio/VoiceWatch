@@ -7,6 +7,8 @@ use std::path::PathBuf;
 use winreg::enums::HKEY_CURRENT_USER;
 use winreg::RegKey;
 
+pub const FIREFOX_EXTENSION_ID: &str = "voice-watch-connector@qxshio.github.io";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BrowserTarget {
     All,
@@ -16,6 +18,7 @@ pub enum BrowserTarget {
     Vivaldi,
     Opera,
     Chromium,
+    Firefox,
 }
 
 impl BrowserTarget {
@@ -28,6 +31,7 @@ impl BrowserTarget {
             "vivaldi" => Ok(Self::Vivaldi),
             "opera" => Ok(Self::Opera),
             "chromium" => Ok(Self::Chromium),
+            "firefox" | "mozilla-firefox" => Ok(Self::Firefox),
             other => Err(anyhow!("unsupported browser target: {other}")),
         }
     }
@@ -56,6 +60,7 @@ impl BrowserTarget {
                 opera_gx_registry_path(),
             ],
             Self::Chromium => vec![chromium_registry_path()],
+            Self::Firefox => vec![firefox_registry_path()],
         }
     }
 }
@@ -70,6 +75,7 @@ impl fmt::Display for BrowserTarget {
             Self::Vivaldi => "Vivaldi",
             Self::Opera => "Opera",
             Self::Chromium => "Chromium",
+            Self::Firefox => "Firefox",
         };
         formatter.write_str(label)
     }
@@ -81,7 +87,7 @@ pub struct RegistrationSummary {
 }
 
 #[derive(Debug, Serialize)]
-struct NativeHostManifest {
+struct ChromiumNativeHostManifest {
     name: &'static str,
     description: &'static str,
     path: String,
@@ -91,9 +97,31 @@ struct NativeHostManifest {
 }
 
 #[derive(Debug, Deserialize)]
-struct ExistingNativeHostManifest {
+struct ExistingChromiumNativeHostManifest {
     #[serde(default)]
     allowed_origins: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct FirefoxNativeHostManifest {
+    name: &'static str,
+    description: &'static str,
+    path: String,
+    #[serde(rename = "type")]
+    kind: &'static str,
+    allowed_extensions: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ExistingFirefoxNativeHostManifest {
+    #[serde(default)]
+    allowed_extensions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExtensionKind {
+    Chromium,
+    Firefox,
 }
 
 pub fn register_from_protocol_url(url: &str) -> Result<RegistrationSummary> {
@@ -118,7 +146,7 @@ pub fn register_native_host(
     browser: BrowserTarget,
     exe_path: Option<PathBuf>,
 ) -> Result<RegistrationSummary> {
-    validate_extension_id(extension_id)?;
+    let extension_kind = extension_kind(extension_id)?;
 
     let exe_path = match exe_path {
         Some(path) => path,
@@ -128,25 +156,47 @@ pub fn register_native_host(
         .canonicalize()
         .with_context(|| format!("failed to resolve {}", exe_path.display()))?;
 
-    let manifest_path = manifest_path()?;
+    let manifest_path = manifest_path(extension_kind)?;
     if let Some(parent) = manifest_path.parent() {
         fs::create_dir_all(parent)?;
     }
 
-    let manifest = NativeHostManifest {
-        name: NATIVE_HOST_NAME,
-        description: "Voice Watch native messaging host",
-        path: manifest_exe_path(&exe_path),
-        kind: "stdio",
-        allowed_origins: merged_allowed_origins(&manifest_path, extension_id),
+    let manifest_json = match extension_kind {
+        ExtensionKind::Chromium => {
+            if browser == BrowserTarget::Firefox {
+                anyhow::bail!("a Chromium extension ID cannot be registered for Firefox");
+            }
+            serde_json::to_string_pretty(&ChromiumNativeHostManifest {
+                name: NATIVE_HOST_NAME,
+                description: "Voice Watch native messaging host",
+                path: manifest_exe_path(&exe_path),
+                kind: "stdio",
+                allowed_origins: merged_allowed_origins(&manifest_path, extension_id),
+            })?
+        }
+        ExtensionKind::Firefox => {
+            if !matches!(browser, BrowserTarget::All | BrowserTarget::Firefox) {
+                anyhow::bail!("the Firefox add-on ID can only be registered for Firefox");
+            }
+            serde_json::to_string_pretty(&FirefoxNativeHostManifest {
+                name: NATIVE_HOST_NAME,
+                description: "Voice Watch native messaging host",
+                path: manifest_exe_path(&exe_path),
+                kind: "stdio",
+                allowed_extensions: merged_allowed_extensions(&manifest_path, extension_id),
+            })?
+        }
     };
-    let manifest_json = serde_json::to_string_pretty(&manifest)?;
     fs::write(&manifest_path, manifest_json)
         .with_context(|| format!("failed to write {}", manifest_path.display()))?;
 
     let manifest_path = manifest_path.to_string_lossy().to_string();
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    for path in dedup_registry_paths(browser.registry_paths()) {
+    let registration_browser = match extension_kind {
+        ExtensionKind::Chromium => browser,
+        ExtensionKind::Firefox => BrowserTarget::Firefox,
+    };
+    for path in dedup_registry_paths(registration_browser.registry_paths()) {
         let (key, _) = hkcu
             .create_subkey(path)
             .with_context(|| format!("failed to create HKCU\\{path}"))?;
@@ -154,14 +204,16 @@ pub fn register_native_host(
             .with_context(|| format!("failed to write HKCU\\{path}"))?;
     }
 
-    Ok(RegistrationSummary { browser })
+    Ok(RegistrationSummary {
+        browser: registration_browser,
+    })
 }
 
 fn merged_allowed_origins(manifest_path: &std::path::Path, extension_id: &str) -> Vec<String> {
     let new_origin = format!("chrome-extension://{extension_id}/");
     let mut origins = fs::read_to_string(manifest_path)
         .ok()
-        .and_then(|text| serde_json::from_str::<ExistingNativeHostManifest>(&text).ok())
+        .and_then(|text| serde_json::from_str::<ExistingChromiumNativeHostManifest>(&text).ok())
         .map(|manifest| manifest.allowed_origins)
         .unwrap_or_default();
 
@@ -169,6 +221,19 @@ fn merged_allowed_origins(manifest_path: &std::path::Path, extension_id: &str) -
     origins.sort();
     origins.dedup();
     origins
+}
+
+fn merged_allowed_extensions(manifest_path: &std::path::Path, extension_id: &str) -> Vec<String> {
+    let mut extensions = fs::read_to_string(manifest_path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<ExistingFirefoxNativeHostManifest>(&text).ok())
+        .map(|manifest| manifest.allowed_extensions)
+        .unwrap_or_default();
+
+    extensions.push(extension_id.to_string());
+    extensions.sort();
+    extensions.dedup();
+    extensions
 }
 
 fn dedup_registry_paths(paths: Vec<&'static str>) -> Vec<&'static str> {
@@ -181,18 +246,21 @@ fn dedup_registry_paths(paths: Vec<&'static str>) -> Vec<&'static str> {
     deduped
 }
 
-fn validate_extension_id(extension_id: &str) -> Result<()> {
-    let valid = extension_id.len() == 32
+fn extension_kind(extension_id: &str) -> Result<ExtensionKind> {
+    let chromium = extension_id.len() == 32
         && extension_id
             .chars()
             .all(|char_| ('a'..='p').contains(&char_));
-    if valid {
-        Ok(())
-    } else {
-        Err(anyhow!(
-            "extension ID must be exactly 32 lowercase letters from a to p"
-        ))
+    if chromium {
+        return Ok(ExtensionKind::Chromium);
     }
+    if extension_id == FIREFOX_EXTENSION_ID {
+        return Ok(ExtensionKind::Firefox);
+    }
+
+    Err(anyhow!(
+        "extension ID must be a 32-letter Chromium ID or the official Voice Watch Firefox add-on ID"
+    ))
 }
 
 fn query_value(query: &str, name: &str) -> Option<String> {
@@ -233,14 +301,18 @@ fn percent_decode(value: &str) -> String {
     output
 }
 
-fn manifest_path() -> Result<PathBuf> {
+fn manifest_path(kind: ExtensionKind) -> Result<PathBuf> {
     let base = std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
         .context("LOCALAPPDATA must be set on Windows")?;
+    let file_name = match kind {
+        ExtensionKind::Chromium => format!("{NATIVE_HOST_NAME}.json"),
+        ExtensionKind::Firefox => format!("{NATIVE_HOST_NAME}-firefox.json"),
+    };
     Ok(base
         .join("VoiceWatch")
         .join("native-messaging")
-        .join(format!("{NATIVE_HOST_NAME}.json")))
+        .join(file_name))
 }
 
 fn manifest_exe_path(path: &std::path::Path) -> String {
@@ -286,6 +358,10 @@ fn chromium_registry_path() -> &'static str {
     r"Software\Chromium\NativeMessagingHosts\com.voice_watch.native"
 }
 
+fn firefox_registry_path() -> &'static str {
+    r"Software\Mozilla\NativeMessagingHosts\com.voice_watch.native"
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -311,6 +387,10 @@ mod tests {
         assert_eq!(
             BrowserTarget::parse("chromium").unwrap(),
             BrowserTarget::Chromium
+        );
+        assert_eq!(
+            BrowserTarget::parse("firefox").unwrap(),
+            BrowserTarget::Firefox
         );
     }
 
@@ -367,6 +447,36 @@ mod tests {
     }
 
     #[test]
+    fn firefox_uses_its_addon_id_and_registry_path() {
+        assert_eq!(
+            extension_kind(FIREFOX_EXTENSION_ID).unwrap(),
+            ExtensionKind::Firefox
+        );
+        assert_eq!(
+            BrowserTarget::Firefox.registry_paths(),
+            vec![firefox_registry_path()]
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let manifest_path = dir.path().join("com.voice_watch.native-firefox.json");
+        fs::write(
+            &manifest_path,
+            r#"{
+  "allowed_extensions": ["existing@example.org"]
+}"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            merged_allowed_extensions(&manifest_path, FIREFOX_EXTENSION_ID),
+            vec![
+                "existing@example.org".to_string(),
+                FIREFOX_EXTENSION_ID.to_string(),
+            ]
+        );
+    }
+
+    #[test]
     fn protocol_registration_rejects_invalid_extension_id() {
         let error = register_from_protocol_url(
             "voice-watch://register-native-host?extensionId=not-valid&browser=chrome",
@@ -375,7 +485,7 @@ mod tests {
 
         assert!(error
             .to_string()
-            .contains("extension ID must be exactly 32 lowercase letters"));
+            .contains("32-letter Chromium ID or the official Voice Watch Firefox add-on ID"));
     }
 
     #[test]

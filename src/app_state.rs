@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use crate::countdown::AnchoredCountdown;
 use crate::messages::{VoiceStatusData, VoiceStatusEnvelope, VoiceStatusErrorKind};
 
@@ -7,57 +5,31 @@ use crate::messages::{VoiceStatusData, VoiceStatusEnvelope, VoiceStatusErrorKind
 pub enum VoiceState {
     Disconnected,
     Connected,
-    RobloxNotRunning,
     Checking,
-    VoiceOk {
-        checked_at_ms: i64,
-    },
-    TempSuspended {
-        checked_at_ms: i64,
-        banned_until_ms: i64,
-        ban_reason: Option<i32>,
-        denial_reason: Option<i32>,
-    },
-    SuspendedUnknownDuration {
-        checked_at_ms: i64,
-        ban_reason: Option<i32>,
-        denial_reason: Option<i32>,
-    },
-    Ineligible {
-        checked_at_ms: i64,
-        denial_reason: Option<i32>,
-    },
-    AuthError {
-        checked_at_ms: i64,
-    },
-    NetworkError {
-        checked_at_ms: i64,
-        message: String,
-    },
-    RateLimited {
-        checked_at_ms: i64,
-        retry_after_ms: Option<i64>,
-    },
-    Restored {
-        checked_at_ms: i64,
-    },
+    VoiceOk,
+    TempSuspended,
+    SuspendedUnknownDuration,
+    Ineligible,
+    AuthError,
+    NetworkError,
+    RateLimited,
+    Restored,
 }
 
 impl VoiceState {
-    pub fn label(&self) -> String {
+    pub fn label(&self) -> &'static str {
         match self {
-            VoiceState::Disconnected => "Disconnected".into(),
-            VoiceState::Connected => "Connected".into(),
-            VoiceState::RobloxNotRunning => "Roblox not in game".into(),
-            VoiceState::Checking => "Checking voice status".into(),
-            VoiceState::VoiceOk { .. } => "Voice chat available".into(),
-            VoiceState::TempSuspended { .. } => "Voice chat suspended".into(),
-            VoiceState::SuspendedUnknownDuration { .. } => "Suspended, duration unknown".into(),
-            VoiceState::Ineligible { .. } => "Voice chat unavailable".into(),
-            VoiceState::AuthError { .. } => "Logged out".into(),
-            VoiceState::NetworkError { .. } => "Network error".into(),
-            VoiceState::RateLimited { .. } => "Rate limited".into(),
-            VoiceState::Restored { .. } => "Voice chat restored".into(),
+            VoiceState::Disconnected => "Disconnected",
+            VoiceState::Connected => "Connected",
+            VoiceState::Checking => "Checking voice status",
+            VoiceState::VoiceOk => "Voice chat available",
+            VoiceState::TempSuspended => "Voice chat suspended",
+            VoiceState::SuspendedUnknownDuration => "Suspended, duration unknown",
+            VoiceState::Ineligible => "Voice chat unavailable",
+            VoiceState::AuthError => "Logged out",
+            VoiceState::NetworkError => "Network error",
+            VoiceState::RateLimited => "Rate limited",
+            VoiceState::Restored => "Voice chat restored",
         }
     }
 }
@@ -105,34 +77,16 @@ impl AppState {
         self.voice_state = VoiceState::Checking;
     }
 
-    pub fn mark_roblox_not_running(&mut self) {
-        if matches!(
-            self.voice_state,
-            VoiceState::TempSuspended { .. }
-                | VoiceState::SuspendedUnknownDuration { .. }
-                | VoiceState::Restored { .. }
-        ) {
-            return;
-        }
-        self.voice_state = VoiceState::RobloxNotRunning;
-    }
-
-    pub fn mark_restored(&mut self, checked_at_ms: i64) {
-        self.last_checked_at_ms = Some(checked_at_ms);
+    pub fn mark_restored(&mut self) {
         self.countdown = None;
-        self.voice_state = VoiceState::Restored { checked_at_ms };
+        self.voice_state = VoiceState::Restored;
     }
 
     pub fn mark_test_suspended(&mut self, checked_at_ms: i64, banned_until_ms: i64) {
         self.last_checked_at_ms = Some(checked_at_ms);
         self.restored_overlay_shown = false;
         self.countdown = Some(AnchoredCountdown::new(banned_until_ms));
-        self.voice_state = VoiceState::TempSuspended {
-            checked_at_ms,
-            banned_until_ms,
-            ban_reason: Some(7),
-            denial_reason: Some(6),
-        };
+        self.voice_state = VoiceState::TempSuspended;
     }
 
     pub fn apply_voice_status(&mut self, envelope: VoiceStatusEnvelope) {
@@ -140,39 +94,31 @@ impl AppState {
         self.last_checked_at_ms = Some(envelope.checked_at);
 
         if !envelope.ok {
+            if self.has_known_suspension() {
+                return;
+            }
             self.countdown = None;
             let Some(error) = envelope.error else {
-                self.voice_state = VoiceState::NetworkError {
-                    checked_at_ms: envelope.checked_at,
-                    message: "Status check failed without an error body".into(),
-                };
+                self.voice_state = VoiceState::NetworkError;
                 return;
             };
 
             self.voice_state = match error.kind {
-                VoiceStatusErrorKind::AuthError => VoiceState::AuthError {
-                    checked_at_ms: envelope.checked_at,
-                },
-                VoiceStatusErrorKind::RateLimited => VoiceState::RateLimited {
-                    checked_at_ms: envelope.checked_at,
-                    retry_after_ms: error.retry_after_ms,
-                },
+                VoiceStatusErrorKind::AuthError => VoiceState::AuthError,
+                VoiceStatusErrorKind::RateLimited => VoiceState::RateLimited,
                 VoiceStatusErrorKind::NetworkError | VoiceStatusErrorKind::UnexpectedResponse => {
-                    VoiceState::NetworkError {
-                        checked_at_ms: envelope.checked_at,
-                        message: error.message,
-                    }
+                    VoiceState::NetworkError
                 }
             };
             return;
         }
 
         let Some(data) = envelope.data else {
+            if self.has_known_suspension() {
+                return;
+            }
             self.countdown = None;
-            self.voice_state = VoiceState::NetworkError {
-                checked_at_ms: envelope.checked_at,
-                message: "Status check succeeded without sanitized data".into(),
-            };
+            self.voice_state = VoiceState::NetworkError;
             return;
         };
 
@@ -188,20 +134,11 @@ impl AppState {
             match data.banned_until_ms {
                 Some(banned_until_ms) => {
                     self.countdown = Some(AnchoredCountdown::new(banned_until_ms));
-                    self.voice_state = VoiceState::TempSuspended {
-                        checked_at_ms,
-                        banned_until_ms,
-                        ban_reason: data.ban_reason,
-                        denial_reason: data.denial_reason,
-                    };
+                    self.voice_state = VoiceState::TempSuspended;
                 }
                 None => {
                     self.countdown = None;
-                    self.voice_state = VoiceState::SuspendedUnknownDuration {
-                        checked_at_ms,
-                        ban_reason: data.ban_reason,
-                        denial_reason: data.denial_reason,
-                    };
+                    self.voice_state = VoiceState::SuspendedUnknownDuration;
                 }
             }
             return;
@@ -211,20 +148,24 @@ impl AppState {
         if data.is_voice_enabled && data.is_user_opt_in && data.is_user_eligible {
             self.voice_state = if matches!(
                 self.voice_state,
-                VoiceState::TempSuspended { .. }
-                    | VoiceState::SuspendedUnknownDuration { .. }
-                    | VoiceState::Restored { .. }
+                VoiceState::TempSuspended
+                    | VoiceState::SuspendedUnknownDuration
+                    | VoiceState::Restored
             ) {
-                VoiceState::Restored { checked_at_ms }
+                VoiceState::Restored
             } else {
-                VoiceState::VoiceOk { checked_at_ms }
+                VoiceState::VoiceOk
             };
         } else {
-            self.voice_state = VoiceState::Ineligible {
-                checked_at_ms,
-                denial_reason: data.denial_reason,
-            };
+            self.voice_state = VoiceState::Ineligible;
         }
+    }
+
+    fn has_known_suspension(&self) -> bool {
+        matches!(
+            self.voice_state,
+            VoiceState::TempSuspended | VoiceState::SuspendedUnknownDuration
+        )
     }
 }
 
@@ -249,10 +190,7 @@ mod tests {
             },
         );
 
-        assert!(matches!(
-            state.voice_state,
-            VoiceState::TempSuspended { .. }
-        ));
+        assert!(matches!(state.voice_state, VoiceState::TempSuspended));
         assert!(state.countdown.is_some());
     }
 
@@ -272,7 +210,38 @@ mod tests {
         });
 
         assert!(state.is_browser_connected());
-        assert!(matches!(state.voice_state, VoiceState::AuthError { .. }));
+        assert!(matches!(state.voice_state, VoiceState::AuthError));
         assert_eq!(state.voice_state.label(), "Logged out");
+    }
+
+    #[test]
+    fn failed_check_does_not_discard_a_known_suspension() {
+        let mut state = AppState::default();
+        state.mark_test_suspended(100, 10_000);
+        state.apply_voice_status(VoiceStatusEnvelope {
+            request_id: "failed-check".into(),
+            checked_at: 200,
+            ok: false,
+            data: None,
+            error: Some(VoiceStatusError {
+                kind: VoiceStatusErrorKind::NetworkError,
+                message: "offline".into(),
+                retry_after_ms: None,
+            }),
+        });
+
+        assert!(matches!(state.voice_state, VoiceState::TempSuspended));
+        assert!(state.countdown.is_some());
+        assert_eq!(state.last_checked_at_ms, Some(200));
+    }
+
+    #[test]
+    fn local_countdown_expiry_preserves_the_last_real_check_time() {
+        let mut state = AppState::default();
+        state.mark_test_suspended(100, 10_000);
+        state.mark_restored();
+
+        assert!(matches!(state.voice_state, VoiceState::Restored));
+        assert_eq!(state.last_checked_at_ms, Some(100));
     }
 }

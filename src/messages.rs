@@ -39,6 +39,13 @@ pub enum AppMessage {
         #[serde(rename = "requestId")]
         request_id: String,
     },
+    Rejoin {
+        server: LastServer,
+    },
+    UpdateExtension {
+        #[serde(rename = "desktopVersion")]
+        desktop_version: String,
+    },
     PollReadiness {
         #[serde(rename = "requestId")]
         request_id: String,

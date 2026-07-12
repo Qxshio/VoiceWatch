@@ -12,10 +12,11 @@ use serde::Serialize;
 use std::io::{self, Read, Write};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 const MAX_MESSAGE_BYTES: u32 = 1024 * 1024;
 const SMART_POLLING_MIC_QUIET_SECONDS: u64 = 20;
+const MANUAL_CHECK_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 pub fn run_native_host() -> Result<()> {
     let mut session = NativeSession::new(settings::load_settings().unwrap_or_default());
@@ -25,7 +26,7 @@ pub fn run_native_host() -> Result<()> {
     let input = spawn_native_input_reader();
 
     loop {
-        match input.recv_timeout(Duration::from_millis(100)) {
+        match input.recv_timeout(MANUAL_CHECK_POLL_INTERVAL) {
             Ok(NativeInput::Frame(frame)) => {
                 handle_native_frame(&frame, &mut session, &mut connection, &mut writer)?;
             }
@@ -34,7 +35,7 @@ pub fn run_native_host() -> Result<()> {
             Err(RecvTimeoutError::Timeout) => {}
         }
 
-        dispatch_requested_voice_check(&connection, &mut writer)?;
+        dispatch_requested_desktop_command(&connection, &mut writer)?;
     }
 
     Ok(())
@@ -73,14 +74,14 @@ fn handle_native_frame(
     writer: &mut impl Write,
 ) -> Result<()> {
     let message = serde_json::from_slice::<ExtensionMessage>(frame)
-        .or_else(|_| decode_voice_status_fallback(frame))
         .context("failed to decode extension message")?;
 
     match message {
         ExtensionMessage::Hello {
-            protocol_version, ..
+            extension_version,
+            protocol_version,
         } if protocol_version == PROTOCOL_VERSION => {
-            connection.mark_connected();
+            connection.mark_connected(&extension_version);
             write_json(
                 writer,
                 &AppMessage::HelloAck {
@@ -157,7 +158,7 @@ fn handle_native_frame(
     Ok(())
 }
 
-fn dispatch_requested_voice_check(
+fn dispatch_requested_desktop_command(
     connection: &PublishedExtensionConnection,
     writer: &mut impl Write,
 ) -> Result<()> {
@@ -165,15 +166,24 @@ fn dispatch_requested_voice_check(
         return Ok(());
     }
 
-    let request_id = match ipc::take_voice_check_request() {
-        Ok(request_id) => request_id,
+    let command = match ipc::take_desktop_command() {
+        Ok(command) => command,
         Err(error) => {
-            eprintln!("Failed to read manual voice check request: {error:#}");
+            eprintln!("Failed to read desktop command: {error:#}");
             return Ok(());
         }
     };
-    if let Some(request_id) = request_id {
-        write_json(writer, &AppMessage::CheckVoiceStatus { request_id })?;
+    match command {
+        Some(ipc::DesktopCommand::CheckVoiceStatus { request_id }) => {
+            write_json(writer, &AppMessage::CheckVoiceStatus { request_id })?;
+        }
+        Some(ipc::DesktopCommand::Rejoin { server }) => {
+            write_json(writer, &AppMessage::Rejoin { server })?;
+        }
+        Some(ipc::DesktopCommand::UpdateExtension { desktop_version }) => {
+            write_json(writer, &AppMessage::UpdateExtension { desktop_version })?;
+        }
+        None => {}
     }
 
     Ok(())
@@ -189,9 +199,9 @@ impl PublishedExtensionConnection {
         self.connected
     }
 
-    fn mark_connected(&mut self) {
+    fn mark_connected(&mut self, extension_version: &str) {
         if !self.connected {
-            let _ = ipc::publish_extension_connected();
+            let _ = ipc::publish_extension_connected(extension_version);
             self.connected = true;
         }
     }
@@ -220,6 +230,7 @@ enum LastVoiceStatus {
 #[derive(Debug)]
 struct NativeSession {
     settings: Settings,
+    settings_modified_at: Option<SystemTime>,
     microphone_status_published: bool,
     microphone_quiet_since: Option<Instant>,
     last_voice_status: LastVoiceStatus,
@@ -229,6 +240,7 @@ impl NativeSession {
     fn new(settings: Settings) -> Self {
         Self {
             settings,
+            settings_modified_at: settings::modified_at(),
             microphone_status_published: false,
             microphone_quiet_since: None,
             last_voice_status: LastVoiceStatus::Unknown,
@@ -236,8 +248,14 @@ impl NativeSession {
     }
 
     fn reload_settings(&mut self) {
+        let modified_at = settings::modified_at();
+        if modified_at == self.settings_modified_at {
+            return;
+        }
+
         if let Ok(settings) = settings::load_settings() {
             self.settings = settings;
+            self.settings_modified_at = settings::modified_at();
         }
     }
 
@@ -408,16 +426,6 @@ pub fn write_json(writer: &mut impl Write, message: &impl Serialize) -> Result<(
     Ok(())
 }
 
-fn decode_voice_status_fallback(frame: &[u8]) -> Result<ExtensionMessage> {
-    let value = serde_json::from_slice::<serde_json::Value>(frame)?;
-    if value.get("type").and_then(|kind| kind.as_str()) == Some("voice_status") {
-        let envelope = serde_json::from_value::<VoiceStatusEnvelope>(value)?;
-        return Ok(ExtensionMessage::VoiceStatus(envelope));
-    }
-
-    Err(anyhow!("unsupported native message"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -456,6 +464,30 @@ mod tests {
             message,
             ExtensionMessage::PollReadinessRequest { .. }
         ));
+    }
+
+    #[test]
+    fn voice_status_message_decodes_directly() {
+        let message = serde_json::from_str::<ExtensionMessage>(
+            r#"{
+  "type": "voice_status",
+  "requestId": "status",
+  "checkedAt": 1000,
+  "ok": true,
+  "data": {
+    "isVoiceEnabled": true,
+    "isUserOptIn": true,
+    "isUserEligible": true,
+    "isBanned": false,
+    "banReason": null,
+    "bannedUntilMs": null,
+    "denialReason": null
+  }
+}"#,
+        )
+        .unwrap();
+
+        assert!(matches!(message, ExtensionMessage::VoiceStatus(_)));
     }
 
     #[test]

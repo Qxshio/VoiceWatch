@@ -1,35 +1,30 @@
 # Roadmap
 
-## Prototype
+## Shipped in the open beta
 
-- [x] Create Rust desktop project slices.
-- [x] Add Manifest V3 extension.
-- [x] Implement safe voice-status fetch in the extension.
-- [x] Add native messaging frame support.
-- [x] Add countdown state and local countdown math.
-- [x] Add basic tray runtime.
-- [x] Add basic restore notification fallback.
-- [x] Add best-effort Roblox log parser.
-- [x] Add user-clicked rejoin target helper.
-- [x] Add compact Roblox-window suspension HUD.
-- [x] Add launch-on-startup integration.
-- [x] Add a settings native window.
-- [x] Add docs and setup scripts.
-- [x] Add Windows installer packaging and release artifact workflow.
+- [x] Rust desktop app split into focused runtime slices.
+- [x] Chromium and Firefox browser connector packages.
+- [x] Privacy-preserving voice-status fetch and sanitization.
+- [x] Browser native messaging with automatic per-user registration.
+- [x] Visible Roblox window and microphone activity detection.
+- [x] Smart polling, suspension-aware sleeps, and rate-limit delays.
+- [x] Monotonic local countdown and compact draggable Roblox HUD.
+- [x] User-clicked exact-server rejoin through the connected browser.
+- [x] Persisted tray/native-host IPC with restart recovery.
+- [x] Native settings, startup preference, and restore sound.
+- [x] Per-user Windows installer and user-clicked update flow.
+- [x] Store upload packages and Mozilla source-review package.
 
 ## Next
 
-- [ ] Implement named-pipe IPC between native host mode and running tray app.
-- [ ] Let the tray app request status checks from the connected extension.
-- [ ] Add a richer native status/debug window.
-- [ ] Add graceful rate-limit and repeated-failure backoff in the runtime loop.
-- [ ] Improve last-server parsing with real-world Roblox log samples.
-- [ ] Add release packaging and code signing notes.
-- [ ] Add installer flow for native messaging registration.
+- [ ] Expand real-world Roblox log fixtures and rejoin regression coverage.
+- [ ] Add Windows code-signing and release provenance documentation.
+- [ ] Link approved browser-store listings from setup and release docs.
+- [ ] Add an opt-in diagnostics view for connection and polling state.
+- [ ] Improve HUD placement across unusual multi-monitor and DPI layouts.
 
 ## Later
 
-- [ ] Optional sound notification.
-- [ ] Better multi-monitor overlay placement.
 - [ ] Localization.
-- [ ] Public extension store packaging.
+- [ ] Additional notification sound choices.
+- [ ] Signed extension update channels for every supported browser store.
